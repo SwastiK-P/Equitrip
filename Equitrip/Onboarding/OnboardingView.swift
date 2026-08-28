@@ -145,7 +145,7 @@ struct OnboardingFeature: Identifiable {
 
     static let all: [OnboardingFeature] = [
         .init(
-            symbol: "map.fill",
+            symbol: "point.bottomleft.forward.to.point.topright.scurvepath.fill",
             title: "One itinerary, everyone in sync.",
             subtitle: "Flights, stays and activities in one plan."
         ),

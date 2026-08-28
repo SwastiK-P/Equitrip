@@ -29,8 +29,26 @@ struct JoinTripFlow: View {
     @State private var showTravellers = false
     @FocusState private var codeFocused: Bool
 
+    /// The white the scanner's burst ends on, held here rather than inside the
+    /// scanner because it has to outlive it: the camera screen is torn down
+    /// and the preview built while this is opaque, and the preview is then
+    /// revealed by fading it off. A cover owned by the view being replaced
+    /// would blink out at exactly the wrong moment.
+    @State private var flash = false
+    /// What the lookup found, once it has. Held rather than acted on because
+    /// the burst and the network call run at the same time and either can
+    /// finish first — whichever is last calls `settleScan`.
+    @State private var scanOutcome: ScanOutcome?
+    /// Whether the screen is currently white.
+    @State private var isCovered = false
+
     private enum Stage: Equatable {
         case entry, scanning, preview, joined
+    }
+
+    private enum ScanOutcome {
+        case found(Trip)
+        case failed(String)
     }
 
     var body: some View {
@@ -39,15 +57,35 @@ struct JoinTripFlow: View {
 
             Group {
                 switch stage {
-                case .entry: entry
-                case .scanning: scanner
-                case .preview, .joined: preview
+                case .entry:
+                    entry
+                        .transition(.opacity.combined(with: .move(edge: .leading)))
+
+                case .scanning:
+                    // The camera opens out of the middle of the screen rather
+                    // than sliding in from the side: a full-bleed live feed
+                    // travelling sideways looks like a dropped frame.
+                    scanner
+                        .transition(.scale(scale: 1.06).combined(with: .opacity))
+
+                case .preview, .joined:
+                    preview
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
                 }
             }
-            .transition(.opacity.combined(with: .move(edge: .trailing)))
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .safeAreaBar(edge: .top, spacing: 0) { header }
+        // The scanner carries its own controls — see `QRScanScreen.topBar` —
+        // and the peach header is invisible over a camera feed anyway.
+        .safeAreaBar(edge: .top, spacing: 0) {
+            if stage != .scanning { header }
+        }
+        .overlay {
+            Color.white
+                .opacity(flash ? 1 : 0)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        }
         .sheet(isPresented: $showTravellers) {
             if let matched {
                 // Read-only: you can look at who's coming before you commit to
@@ -163,7 +201,7 @@ struct JoinTripFlow: View {
                     .foregroundStyle(AppTheme.danger)
                 }
 
-                Button(action: resolve) {
+                Button { resolve() } label: {
                     Text("Find trip")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(maxWidth: .infinity)
@@ -199,7 +237,7 @@ struct JoinTripFlow: View {
                 .autocorrectionDisabled()
                 .focused($codeFocused)
                 .submitLabel(.go)
-                .onSubmit(resolve)
+                .onSubmit { resolve() }
                 .onChange(of: code) { _, new in
                     // Re-group as they type so the field always matches the
                     // shape printed on the invite card.
@@ -216,22 +254,30 @@ struct JoinTripFlow: View {
     // MARK: - Scanning
 
     private var scanner: some View {
-        QRScannerView { scanned in
-            guard let extracted = Self.code(from: scanned) else { return }
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            code = Trip.formatCode(extracted)
-            resolve()
-        }
+        QRScanScreen(
+            onScan: { scanned in
+                guard let extracted = Self.code(from: scanned) else { return false }
+                code = Trip.formatCode(extracted)
+                resolve(viaScan: true)
+                return true
+            },
+            onCancel: {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) {
+                    stage = .entry
+                }
+            },
+            onWhiteout: {
+                // Instant, not animated: this is the frame the burst ended on,
+                // and easing into it would show the camera again first.
+                isCovered = true
+                flash = true
+                settleScan()
+            },
+            // Holds the "got it" frame while the lookup runs, instead of the
+            // sweep resuming as though nothing had been found.
+            isResolving: isWorking
+        )
         .ignoresSafeArea()
-        .overlay(alignment: .bottom) {
-            Text("Point at the invite card's QR")
-                .font(.system(size: 13.5, weight: .medium))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(.black.opacity(0.5), in: .capsule)
-                .padding(.bottom, 40)
-        }
     }
 
     /// Accepts either a bare code or a full `equitrip://join/CODE` link, since
@@ -406,7 +452,7 @@ struct JoinTripFlow: View {
     /// trips you're already a member of — so a code for somebody else's trip,
     /// which is the entire point of the screen, always came back "no such
     /// trip".
-    private func resolve() {
+    private func resolve(viaScan: Bool = false) {
         codeFocused = false
         guard !isWorking else { return }
 
@@ -416,6 +462,15 @@ struct JoinTripFlow: View {
         Task {
             let found = await store.findTrip(code: code)
             isWorking = false
+
+            // A scan doesn't change screens here. The burst is still playing,
+            // and swapping the camera out from under it would cut the
+            // animation in half; the result waits for the white instead.
+            guard !viaScan else {
+                scanOutcome = found.map { .found($0) } ?? .failed("No trip matches that code.")
+                if isCovered { settleScan() }
+                return
+            }
 
             guard let found else {
                 error = "No trip matches that code."
@@ -427,6 +482,31 @@ struct JoinTripFlow: View {
             matched = found
             withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) { stage = .preview }
         }
+    }
+
+    /// Swaps what's under the white, then takes the white away.
+    ///
+    /// Called from both sides of the race — the burst finishing and the lookup
+    /// returning — and does nothing until both have happened. The screen
+    /// change itself is deliberately unanimated: it happens behind an opaque
+    /// cover, so the only thing anyone sees is the fade.
+    private func settleScan() {
+        guard isCovered, let outcome = scanOutcome else { return }
+        scanOutcome = nil
+        isCovered = false
+
+        switch outcome {
+        case .found(let trip):
+            matched = trip
+            stage = .preview
+
+        case .failed(let message):
+            error = message
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            stage = .entry
+        }
+
+        withAnimation(.easeOut(duration: 0.45)) { flash = false }
     }
 
     private func join(_ trip: Trip) {

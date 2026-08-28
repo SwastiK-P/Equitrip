@@ -775,8 +775,23 @@ struct ActivityEvent: Identifiable {
     /// Raw-valued so it round-trips through `notifications.kind`, which is a
     /// plain text column rather than an enum type — the set of things worth
     /// telling someone about grows faster than a migration can keep up with.
-    enum Kind: String {
+    ///
+    /// That column being plain text is also why new cases can be added without
+    /// a migration: `NotificationRow.asNotification` falls back to `.booking`
+    /// for anything it doesn't recognise, so an older build reading a newer
+    /// event shows it with the wrong glyph rather than dropping it.
+    enum Kind: String, CaseIterable {
         case payment, recalculation, refund, joined, booking
+        /// A booking's details moved under people who'd already planned round
+        /// them — a time, a price, who's on it.
+        case bookingChanged = "booking_changed"
+        /// A booking that no longer exists. Distinct from a refund: the money
+        /// may never have been spent, but the plan definitely changed.
+        case bookingRemoved = "booking_removed"
+        /// Someone agreed a payment happened as recorded.
+        case confirmed
+        /// Someone said it didn't. The whole point of `confirmed` existing.
+        case disputed
 
         var symbol: String {
             switch self {
@@ -785,6 +800,10 @@ struct ActivityEvent: Identifiable {
             case .refund: "arrow.uturn.backward"
             case .joined: "person.badge.plus"
             case .booking: "checkmark"
+            case .bookingChanged: "pencil"
+            case .bookingRemoved: "trash"
+            case .confirmed: "checkmark.seal.fill"
+            case .disputed: "exclamationmark.bubble.fill"
             }
         }
 
@@ -795,6 +814,21 @@ struct ActivityEvent: Identifiable {
             case .refund: AppTheme.positive
             case .joined: Palette.violet
             case .booking: Palette.blue
+            case .bookingChanged: Palette.amber
+            case .bookingRemoved: AppTheme.danger
+            case .confirmed: AppTheme.positive
+            case .disputed: AppTheme.danger
+            }
+        }
+
+        /// Which switch in Settings governs this event. Several kinds share
+        /// one — nobody wants four separate toggles for "a booking changed".
+        var channel: NotificationChannel {
+            switch self {
+            case .payment, .refund, .confirmed, .disputed: .payments
+            case .booking, .bookingChanged, .bookingRemoved: .bookings
+            case .joined: .people
+            case .recalculation: .balances
             }
         }
     }
@@ -810,7 +844,76 @@ struct ActivityEvent: Identifiable {
 
 // MARK: - Notifications
 
+/// The switches in Settings, and what each one covers.
+///
+/// Grouped by the question being answered rather than by event type: "tell me
+/// when money moves" is a thing somebody wants; "tell me about
+/// `booking_changed` but not `booking_removed`" is not.
+enum NotificationChannel: String, CaseIterable, Identifiable {
+    case payments, bookings, people, balances
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .payments: "Payments"
+        case .bookings: "Bookings"
+        case .people: "People"
+        case .balances: "Balance changes"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .payments: "Someone paid, confirmed or disputed"
+        case .bookings: "Added, changed or removed"
+        case .people: "Joined or left a trip"
+        case .balances: "Shares recalculated"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .payments: "creditcard"
+        case .bookings: "calendar"
+        case .people: "person.2"
+        case .balances: "arrow.triangle.2.circlepath"
+        }
+    }
+
+    /// Muting is a per-device preference, not a row on the server: the same
+    /// account on a phone and an iPad can reasonably want different noise.
+    private var key: String { "notify.\(rawValue)" }
+
+    var isOn: Bool {
+        get {
+            // Absent means on. A channel nobody has touched should deliver,
+            // and `bool(forKey:)` answers false for a key that was never set.
+            UserDefaults.standard.object(forKey: key) as? Bool ?? true
+        }
+        nonmutating set {
+            UserDefaults.standard.set(newValue, forKey: key)
+        }
+    }
+}
+
 struct AppNotification: Identifiable {
+    /// What you said about a payment somebody else recorded.
+    ///
+    /// Held on the notification rather than on the booking on purpose. The
+    /// booking records what was paid; this records whether the people it
+    /// landed on *agree*, and those are different claims — one person
+    /// disputing a payment shouldn't rewrite the ledger out from under
+    /// everyone else, it should start a conversation.
+    enum Response: String {
+        case confirmed, disputed
+
+        var label: String { self == .confirmed ? "Confirmed" : "Disputed" }
+        var symbol: String { self == .confirmed ? "checkmark.seal.fill" : "exclamationmark.bubble.fill" }
+        var tint: Color { self == .confirmed ? AppTheme.positive : AppTheme.danger }
+        var event: ActivityEvent.Kind { self == .confirmed ? .confirmed : .disputed }
+    }
+
     let id: UUID
     let kind: ActivityEvent.Kind
     let title: String
@@ -821,6 +924,10 @@ struct AppNotification: Identifiable {
     var isUnread: Bool
     /// Which trip it belongs to, so tapping one can open it.
     var tripID: UUID?
+    /// Your answer, when this is a payment that wanted one. Stored on device —
+    /// see `NotificationStore.responses` — because the `notifications` table
+    /// has no column for it and the answer is worth keeping either way.
+    var response: Response?
 
     init(
         id: UUID = UUID(),
@@ -829,7 +936,8 @@ struct AppNotification: Identifiable {
         body: String,
         date: Date = Date(),
         isUnread: Bool = true,
-        tripID: UUID? = nil
+        tripID: UUID? = nil,
+        response: Response? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -838,7 +946,14 @@ struct AppNotification: Identifiable {
         self.date = date
         self.isUnread = isUnread
         self.tripID = tripID
+        self.response = response
     }
+
+    /// Whether this is asking you something. A payment somebody else recorded
+    /// is a claim on your share, so it gets two buttons rather than being
+    /// filed silently; everything else is news, and news doesn't need an
+    /// answer.
+    var needsResponse: Bool { kind == .payment && response == nil && tripID != nil }
 
     var time: String {
         let seconds = Date().timeIntervalSince(date)

@@ -155,6 +155,7 @@ struct TripListView: View {
 /// the trip, the ellipsis opens the menu, and neither has to guess.
 private struct TripPlaceCard: View {
     @Environment(\.tripStore) private var store
+    @Environment(\.tripZoomNamespace) private var zoom
 
     let trip: Trip
     var onOpen: () -> Void
@@ -187,6 +188,11 @@ private struct TripPlaceCard: View {
             .shadow(color: AppTheme.softShadow(.light), radius: 14, y: 6)
         }
         .buttonStyle(PressableButtonStyle())
+        // The whole card is the source, not just the photograph inside it —
+        // the panel, its title and the picture travel together, so the card
+        // reads as being lifted off the list and opened rather than a page
+        // sliding in over the top of it.
+        .tripZoomSource(trip.id, in: zoom)
         .overlay(alignment: .topTrailing) { menu }
         .task(id: trip.cover?.url) { await sampleCover() }
         .accessibilityElement(children: .combine)

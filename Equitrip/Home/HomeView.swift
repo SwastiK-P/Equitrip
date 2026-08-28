@@ -36,7 +36,7 @@ struct HomeView: View {
     /// separately-invented "activity" list. There is one record of what
     /// changed and it lives in Postgres; showing a different one here was how
     /// the screen ended up narrating events that had never happened.
-    private var activity: [AppNotification] { Array(notifications.items.prefix(4)) }
+    private var activity: [AppNotification] { Array(notifications.feed.prefix(4)) }
 
     private var upNext: [ItineraryItem] {
         store.selectedTrip?.upcoming(limit: 3) ?? []
@@ -127,19 +127,32 @@ struct HomeView: View {
     private var topBar: some View {
         GlassEffectContainer(spacing: 18) {
             HStack(spacing: 12) {
-                NotificationBellButton(unread: unreadCount) {
+                // Deliberately smaller than the avatar opposite it. The bell
+                // is a passive indicator most of the time — the face is the
+                // thing you reach for — so the glass ring around it was
+                // carrying more weight than the control deserved.
+                NotificationBellButton(unread: unreadCount, size: 38) {
                     showNotifications = true
                 }
 
                 Spacer(minLength: 0)
 
-                // No glass ring: the memoji already reads as a button, and a
-                // container around a face just looks like a face in a box.
+                // The dashed ring reads as "this is yours to change" the way a
+                // dotted outline does on an empty slot, without putting the
+                // face in a solid box.
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     showProfile = true
                 } label: {
-                    MemojiAvatar(traveller: .you, size: 46)
+                    MemojiAvatar(traveller: .you, size: 38)
+                        .padding(3.5)
+                        .overlay {
+                            Circle()
+                                .strokeBorder(
+                                    AppTheme.accent.opacity(0.6),
+                                    style: StrokeStyle(lineWidth: 1.5, dash: [4.5, 3.5])
+                                )
+                        }
                 }
                 .buttonStyle(PressableButtonStyle())
                 .accessibilityLabel("Your profile")

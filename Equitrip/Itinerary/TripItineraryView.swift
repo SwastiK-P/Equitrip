@@ -378,8 +378,13 @@ struct TripItineraryView: View {
 
     // MARK: - Top bar
 
-    /// Back, and — for whoever holds the pen — the way into editing. Both
-    /// float over the photograph rather than sitting in a bar above it.
+    /// Back on the left, everything you can *do* to the trip on the right —
+    /// as one pill rather than three separate discs.
+    ///
+    /// Three glass circles in a row read as three unrelated decisions floating
+    /// over the photograph, and each one needed its own tap target carved out
+    /// of a busy image. Grouped into a single capsule with hairlines between
+    /// them they read as what they are: one toolbar for this trip.
     private var topBar: some View {
         GlassEffectContainer(spacing: 16) {
             HStack(spacing: 10) {
@@ -388,27 +393,64 @@ struct TripItineraryView: View {
 
                 Spacer(minLength: 0)
 
-                CircleGlyphButton(symbol: "person.badge.plus", size: 40) {
-                    showShare = true
-                }
-                .accessibilityLabel("Invite people")
-
-                if let trip, trip.youAreOrganiser {
-                    CircleGlyphButton(symbol: "plus", size: 40) {
-                        isAddingItem = true
-                    }
-                    .accessibilityLabel("Add booking")
-
-                    CircleGlyphButton(symbol: "slider.horizontal.3", size: 40) {
-                        showEditor = true
-                    }
-                    .accessibilityLabel("Edit trip")
-                }
+                actionCluster
             }
         }
         .padding(.horizontal, 20)
         .padding(.top, 4)
         .padding(.bottom, 8)
+    }
+
+    private var actionCluster: some View {
+        HStack(spacing: 0) {
+            clusterButton(symbol: "person.badge.plus", label: "Invite people") {
+                showShare = true
+            }
+
+            if let trip, trip.youAreOrganiser {
+                clusterDivider
+
+                clusterButton(symbol: "plus", label: "Add booking") {
+                    isAddingItem = true
+                }
+
+                clusterDivider
+
+                clusterButton(symbol: "slider.horizontal.3", label: "Edit trip") {
+                    showEditor = true
+                }
+            }
+        }
+        .frame(height: 40)
+        .glassEffect(.regular, in: .capsule)
+        // Animated so the two organiser-only controls slide out of the pill
+        // rather than the pill snapping to a new width.
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: trip?.youAreOrganiser)
+    }
+
+    private func clusterButton(
+        symbol: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(AppTheme.ink)
+                .frame(width: 44, height: 40)
+                .contentShape(.rect)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .accessibilityLabel(label)
+    }
+
+    private var clusterDivider: some View {
+        Rectangle()
+            .fill(AppTheme.cardStroke.opacity(0.12))
+            .frame(width: 1, height: 18)
     }
 
     // MARK: - Scope

@@ -30,6 +30,9 @@ struct RootTabView: View {
     var onSignOut: () -> Void = {}
 
     @State private var selection: AppTab = .home
+    /// Shared by the trip cards and the itinerary they push — see
+    /// `tripZoomSource`. Owned here because it has to outlive both.
+    @Namespace private var tripZoom
     @State private var store = TripStore()
     @State private var notifications = NotificationStore()
     /// Set when an `equitrip://join/CODE` link arrives from outside the app.
@@ -59,22 +62,13 @@ struct RootTabView: View {
                     TripListView()
                         .navigationDestination(for: UUID.self) { tripID in
                             TripItineraryView(tripID: tripID)
+                                .tripZoomDestination(tripID, in: tripZoom)
                         }
                 }
             }
 
             Tab("Expenses", systemImage: "creditcard.fill", value: AppTab.expenses) {
-                ComingSoonTab(
-                    title: "Expenses",
-                    subtitle: "Every rupee, and whose it was.",
-                    symbol: "creditcard.fill",
-                    tint: Palette.amber,
-                    points: [
-                        "Shared and individual costs across vendors",
-                        "Equal, per-participant, room and organiser-paid splits",
-                        "Cancellations and refunds folded back in"
-                    ]
-                )
+                ExpensesView()
             }
 
             Tab("Settle", systemImage: "arrow.left.arrow.right", value: AppTab.settle) {
@@ -96,7 +90,12 @@ struct RootTabView: View {
         .tabBarMinimizeBehavior(.onScrollDown)
         .environment(\.tripStore, store)
         .environment(\.notificationStore, notifications)
+        .environment(\.tripZoomNamespace, tripZoom)
         .task {
+            // Set before the first sync, so a change made the moment the app
+            // opens still reaches the rest of the trip.
+            store.notifier = notifications
+
             // Both feeds come from the server now, and neither blocks the
             // other — an empty notification list shouldn't hold up the trips.
             async let trips: Void = store.sync()

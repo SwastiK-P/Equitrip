@@ -14,7 +14,9 @@ struct TripDraft {
     var destination: String = ""
     var startDate: Date = Calendar.current.startOfDay(for: Date())
     var endDate: Date = Date.daysFromToday(3)
-    var currencyCode: String = "INR"
+    /// Seeded from the account's default rather than hard-coded, so the
+    /// setting is a setting rather than a label.
+    var currencyCode: String = AppSettings.defaultCurrency
     var travellers: [Traveller] = [.you]
     var items: [ItineraryItem] = []
     var cover: TripPhoto?

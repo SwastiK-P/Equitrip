@@ -36,6 +36,20 @@ struct ItineraryItemDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 hero
+
+                // Above the money, not below it. On a flight the boarding pass
+                // *is* the booking — gate, terminal, and how long you've got —
+                // and burying it under the cost breakdown meant scrolling past
+                // three cards of arithmetic to find out which airport you're
+                // leaving from.
+                if let flight = item.flight, flight.isResolved {
+                    VStack(alignment: .leading, spacing: 10) {
+                        sectionLabel("Flight details")
+                        FlightTicketCard(flight: flight, fallbackDeparture: item.time)
+                        FlightRouteMap(flight: flight)
+                    }
+                }
+
                 facts
 
                 if item.cost > 0 {
@@ -44,15 +58,6 @@ struct ItineraryItemDetailView: View {
                 }
 
                 who
-
-                if let flight = item.flight, flight.isResolved {
-                    VStack(alignment: .leading, spacing: 10) {
-                        sectionLabel("Flight")
-                        FlightTicketCard(flight: flight, fallbackDeparture: item.time)
-                        FlightRouteMap(flight: flight)
-                    }
-                }
-
                 provenance
 
                 Color.clear.frame(height: 10)

@@ -156,6 +156,11 @@ private struct UnsplashSearchView: View {
                 if isSearching {
                     LoadingState(message: "Searching Unsplash…")
                         .padding(.top, 60)
+                } else if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    // The booking's own title seeds the field, but a brand new
+                    // one has no title yet — nothing to search for, so say so
+                    // instead of sitting there blank.
+                    promptState
                 } else if searched, results.isEmpty {
                     emptyState
                 } else {
@@ -174,6 +179,19 @@ private struct UnsplashSearchView: View {
         .onDisappear { searchTask?.cancel() }
     }
 
+    private var promptState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "sparkle.magnifyingglass")
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(AppTheme.inkTertiary)
+            Text("Search for a place, a vendor, anything")
+                .font(.system(size: 14))
+                .foregroundStyle(AppTheme.inkSecondary)
+        }
+        .padding(.top, 60)
+        .frame(maxWidth: .infinity)
+    }
+
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
@@ -183,7 +201,8 @@ private struct UnsplashSearchView: View {
             TextField("Search photos", text: $query)
                 .font(.system(size: 16))
                 .submitLabel(.search)
-                .onSubmit { debouncedSearch() }
+                .onSubmit { debouncedSearch(delay: 0) }
+                .onChange(of: query) { _, _ in debouncedSearch(delay: 0.4) }
 
             if !query.isEmpty {
                 Button {
@@ -240,14 +259,27 @@ private struct UnsplashSearchView: View {
         .buttonStyle(PressableButtonStyle())
     }
 
-    private func debouncedSearch() {
+    private func debouncedSearch(delay: Double) {
         searchTask?.cancel()
-        searchTask = Task { await runSearch() }
+        searchTask = Task {
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+            }
+            await runSearch()
+        }
     }
 
     private func runSearch() async {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            // Cleared back to empty — drop whatever was showing rather than
+            // leaving stale results up under an empty field.
+            results = []
+            searched = false
+            isSearching = false
+            return
+        }
 
         isSearching = true
         let found = await PhotoService.shared.search(trimmed)

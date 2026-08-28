@@ -53,6 +53,16 @@ final class TripStore {
     /// in the same place instead of two parallel screens.
     var itineraryPath: [UUID] = []
 
+    /// Who to tell when something on a trip moves.
+    ///
+    /// Wired up by `RootTabView` rather than resolved from the environment,
+    /// because the announcements have to fire from the mutations themselves.
+    /// Every screen that adds, edits or deletes a booking would otherwise have
+    /// to remember to announce it too, and the ones that forgot were exactly
+    /// the ones where a change went unnoticed. `@ObservationIgnored` because
+    /// this is a collaborator, not state anything renders.
+    @ObservationIgnored weak var notifier: NotificationStore?
+
     init(trips: [Trip] = []) {
         self.trips = trips
         self.selectedTripID = trips.first(where: { $0.phase == .live })?.id ?? trips.first?.id
@@ -162,13 +172,26 @@ final class TripStore {
         guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
               let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == item.id })
         else { return }
+
+        let before = trips[tripIndex].items[itemIndex]
         trips[tripIndex].items[itemIndex] = item
+
+        // Announced from the *updated* trip: a payment notification quotes
+        // each person's share, and the share is computed from the booking as
+        // it now stands, not as it was a line ago.
+        notifier?.announceBookingChanged(from: before, to: item, in: trips[tripIndex])
+
         write { try await SupabaseRepository.shared.upsertItem(item, tripID: tripID) }
     }
 
     func removeItem(_ itemID: UUID, in tripID: UUID) {
-        guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }) else { return }
+        guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
+              let removed = trips[tripIndex].items.first(where: { $0.id == itemID })
+        else { return }
+
         trips[tripIndex].items.removeAll { $0.id == itemID }
+        notifier?.announceBookingRemoved(removed, from: trips[tripIndex])
+
         write { try await SupabaseRepository.shared.deleteItem(itemID) }
     }
 
@@ -179,6 +202,9 @@ final class TripStore {
         // falling off the end of the timeline.
         if item.day < trips[tripIndex].startDate { trips[tripIndex].startDate = item.day }
         if item.day > trips[tripIndex].endDate { trips[tripIndex].endDate = item.day }
+
+        notifier?.announceBookingAdded(item, to: trips[tripIndex])
+
         write { try await SupabaseRepository.shared.upsertItem(item, tripID: tripID) }
     }
 

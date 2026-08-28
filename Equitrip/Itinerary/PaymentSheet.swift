@@ -111,8 +111,8 @@ struct PaymentSheet: View {
             paidByID = traveller.id
             // Somebody paying with no method recorded leaves the ledger
             // technically right and useless to anyone reconciling it, so the
-            // most common one is offered rather than nothing.
-            if method == nil { method = .upi }
+            // account's default is offered rather than nothing.
+            if method == nil { method = AppSettings.defaultPaymentMethod }
         } label: {
             HStack(spacing: 12) {
                 MemojiAvatar(traveller: traveller, size: 36)
