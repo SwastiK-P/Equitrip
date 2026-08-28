@@ -12,6 +12,9 @@ struct EquitripApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // Belt and braces with UIUserInterfaceStyle in the plist, so
+                // previews and SwiftUI-hosted sheets match the shipped app.
+                .preferredColorScheme(.light)
         }
     }
 }

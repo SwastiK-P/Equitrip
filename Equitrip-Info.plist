@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Equitrip is a light-mode app: the peach canvas and the photo cards
+	     are designed for one appearance only, so the system never flips it. -->
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>app.equitrip.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>equitrip</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
