@@ -24,6 +24,7 @@ struct TripListView: View {
     @State private var showMap = false
     @State private var editing: Trip?
     @State private var inviting: Trip?
+    @State private var deleting: Trip?
 
     var body: some View {
         ZStack {
@@ -49,10 +50,29 @@ struct TripListView: View {
                 .environment(\.tripStore, store)
         }
         .sheet(item: $editing) { trip in
-            TripEditorSheet(trip: trip) { store.update($0) }
+            TripEditorSheet(
+                trip: trip,
+                onSave: { store.update($0) },
+                onDelete: trip.youAreOrganiser ? { store.delete(trip.id) } : nil
+            )
         }
         .sheet(item: $inviting) { trip in
             TripInviteSheet(trip: trip)
+        }
+        // The menu's delete asks here rather than in the editor, since it
+        // never opened the editor. Same words either way.
+        .confirmationDialog(
+            deleting.map { "Delete \($0.title)?" } ?? "Delete trip?",
+            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete trip", role: .destructive) {
+                if let trip = deleting { store.delete(trip.id) }
+                deleting = nil
+            }
+            Button("Keep it", role: .cancel) { deleting = nil }
+        } message: {
+            Text("This removes it for everyone on the trip, along with every booking on it. It can't be undone.")
         }
     }
 
@@ -117,7 +137,8 @@ struct TripListView: View {
                         trip: trip,
                         onOpen: { store.itineraryPath.append(trip.id) },
                         onEdit: { editing = trip },
-                        onInvite: { inviting = trip }
+                        onInvite: { inviting = trip },
+                        onDelete: { deleting = trip }
                     )
                 }
             }
@@ -161,6 +182,7 @@ private struct TripPlaceCard: View {
     var onOpen: () -> Void
     var onEdit: () -> Void
     var onInvite: () -> Void
+    var onDelete: (() -> Void)?
 
     /// The colour of this trip's photograph, once it has been sampled.
     /// `trip.tint` stands in until then — and permanently, for a trip whose
@@ -317,6 +339,11 @@ private struct TripPlaceCard: View {
             Button("Open trip", systemImage: "arrow.forward") { onOpen() }
             Button("Edit trip", systemImage: "pencil") { onEdit() }
             Button("Invite people", systemImage: "person.badge.plus") { onInvite() }
+
+            if trip.youAreOrganiser, let onDelete {
+                Divider()
+                Button("Delete trip", systemImage: "trash", role: .destructive) { onDelete() }
+            }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .bold))

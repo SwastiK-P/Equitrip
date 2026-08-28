@@ -88,7 +88,10 @@ enum ItineraryKind: String, CaseIterable, Identifiable, Codable {
 
     var defaultSplit: SplitMode {
         switch self {
-        case .stay: .room
+        // A room is shared by whoever is in it, which is what "only
+        // participants" already means — the old `.room` mode was the same rule
+        // under a different name.
+        case .stay: .participants
         case .activity: .participants
         default: .equal
         }
@@ -102,19 +105,34 @@ enum ItineraryKind: String, CaseIterable, Identifiable, Codable {
 enum SplitMode: String, CaseIterable, Identifiable, Codable {
     case equal
     case participants
-    case room
+    /// Everyone named pays a figure somebody typed. The only mode where the
+    /// shares aren't derived from the cost.
+    case custom
     case organiser
     case individual
 
     var id: String { rawValue }
 
+    /// Reads a stored value, including ones this app no longer offers.
+    ///
+    /// `room` was a sixth mode meaning "divided across each room's occupants",
+    /// and it never did that — there is no concept of a room anywhere in the
+    /// model, so `bearers(of:)` handled it identically to `participants`. It
+    /// was a button that duplicated the button next to it. Rows written before
+    /// it was dropped land on the mode it was actually behaving as, so nobody's
+    /// existing arithmetic changes.
+    static func decode(_ raw: String) -> SplitMode {
+        if raw == "room" { return .participants }
+        return SplitMode(rawValue: raw) ?? .equal
+    }
+
     var label: String {
         switch self {
         case .equal: "Split equally"
         case .participants: "Only participants"
-        case .room: "By room"
+        case .custom: "Exact amounts"
         case .organiser: "Organiser pays"
-        case .individual: "Individual"
+        case .individual: "One person"
         }
     }
 
@@ -123,19 +141,19 @@ enum SplitMode: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .equal: "Equally"
         case .participants: "Participants"
-        case .room: "By room"
+        case .custom: "Exact"
         case .organiser: "Organiser"
-        case .individual: "Individual"
+        case .individual: "One person"
         }
     }
 
     var detail: String {
         switch self {
-        case .equal: "Divided across everyone on the trip"
-        case .participants: "Divided only across who joined this"
-        case .room: "Divided across each room's occupants"
-        case .organiser: "Carried by the organiser, not shared"
-        case .individual: "One person's own cost"
+        case .equal: "Divided evenly across everyone on the trip, whether or not they're on this booking"
+        case .participants: "Divided evenly, but only across the people named on this booking"
+        case .custom: "You set what each person owes. The amounts have to add up to the cost"
+        case .organiser: "Carried by whoever is organising the trip, not shared out"
+        case .individual: "One named person carries the whole cost"
         }
     }
 
@@ -143,11 +161,17 @@ enum SplitMode: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .equal: "equal"
         case .participants: "person.2.fill"
-        case .room: "bed.double.fill"
+        case .custom: "slider.horizontal.3"
         case .organiser: "star.fill"
         case .individual: "person.fill"
         }
     }
+
+    /// Whether this mode wants exactly one person named, rather than a set.
+    var isSinglePerson: Bool { self == .individual }
+
+    /// Whether the shares are typed rather than computed.
+    var isCustom: Bool { self == .custom }
 }
 
 // MARK: - Paying
@@ -204,6 +228,14 @@ struct ItineraryItem: Identifiable, Hashable {
     /// Who is actually on this. The subset is the point — a trip total
     /// divided by heads would be wrong for anything but `.equal`.
     var participantIDs: Set<UUID>
+    /// What each person owes, when `split` is `.custom`. Ignored otherwise.
+    ///
+    /// Stored per booking rather than derived, because it can't be derived:
+    /// "Ravi had the lobster" is information the app has no way of working out
+    /// from a total and a headcount. Kept as a dictionary so a participant
+    /// added later simply has no entry yet, rather than silently shifting
+    /// everybody else's figure.
+    var customShares: [UUID: Double]
     /// What to search for a photo of this place, when it deserves one.
     var photoQuery: String?
     /// A photo someone actually picked for this booking — from Unsplash or
@@ -238,6 +270,7 @@ struct ItineraryItem: Identifiable, Hashable {
         cost: Double = 0,
         split: SplitMode? = nil,
         participantIDs: Set<UUID> = [],
+        customShares: [UUID: Double] = [:],
         photoQuery: String? = nil,
         cover: TripPhoto? = nil,
         suggestedSymbol: String? = nil,
@@ -257,6 +290,7 @@ struct ItineraryItem: Identifiable, Hashable {
         self.cost = cost
         self.split = split ?? kind.defaultSplit
         self.participantIDs = participantIDs
+        self.customShares = customShares
         self.photoQuery = photoQuery
         self.cover = cover
         self.suggestedSymbol = suggestedSymbol
@@ -281,6 +315,18 @@ struct ItineraryItem: Identifiable, Hashable {
 
     /// The glyph to draw. A suggestion beats the category default.
     var symbol: String { suggestedSymbol ?? kind.symbol }
+
+    /// The vendor, or nil when there isn't one.
+    ///
+    /// `vendor` is a non-optional string that is very often blank, and half of
+    /// it is whitespace rather than truly empty — an editor field somebody
+    /// tabbed through, an import that found a label and no value. Every call
+    /// site checking `!vendor.isEmpty` therefore left a blank line on screen
+    /// some of the time, so the check lives here once instead.
+    var vendorName: String? {
+        let trimmed = vendor.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 
     /// Start of the day the item falls on — the timeline's grouping key.
     var day: Date { Calendar.current.startOfDay(for: date) }
@@ -477,8 +523,13 @@ struct Trip: Identifiable {
         switch item.split {
         case .equal:
             return travellers
-        case .participants, .room:
+        case .participants:
             return participants(of: item)
+        case .custom:
+            // Only the people actually given an amount. Someone named on the
+            // booking who was assigned nothing owes nothing — which is the
+            // whole point of typing the figures in.
+            return participants(of: item).filter { (item.customShares[$0.id] ?? 0) > 0 }
         case .organiser:
             return organisers.isEmpty ? travellers : organisers
         case .individual:
@@ -492,6 +543,12 @@ struct Trip: Identifiable {
 
     /// What each person owes on one booking. Empty when nobody bears it.
     func shares(of item: ItineraryItem) -> [(traveller: Traveller, amount: Double)] {
+        // Typed amounts are read back exactly as typed. Everything else is the
+        // cost over the heads it lands on.
+        if item.split.isCustom {
+            return bearers(of: item).map { ($0, item.customShares[$0.id] ?? 0) }
+        }
+
         let people = bearers(of: item)
         guard !people.isEmpty else { return [] }
         let each = item.cost / Double(people.count)

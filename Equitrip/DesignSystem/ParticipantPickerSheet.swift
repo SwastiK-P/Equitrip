@@ -25,13 +25,21 @@ struct ParticipantPickerSheet: View {
     var shareEach: Double?
     var currencyCode: String = "INR"
     var selection: Binding<Set<UUID>>?
+    /// Pick exactly one, for the split modes that name a single person.
+    ///
+    /// Changes what an empty set means, which is the subtle part: everywhere
+    /// else in the app "nobody selected" is shorthand for "everybody", because
+    /// a booking with no names on it is a whole-group cost. Under
+    /// single-selection that reading is nonsense — "one person, unspecified,
+    /// owes all of it" isn't a state worth being able to express — so empty
+    /// means empty and the sheet says so.
+    var singleSelection: Bool = false
 
     private var isEditable: Bool { selection != nil }
 
-    /// An empty set means everybody, everywhere else in the app, so the sheet
-    /// has to draw it that way rather than as nobody selected.
     private func isOn(_ traveller: Traveller) -> Bool {
         guard let selection else { return true }
+        if singleSelection { return selection.wrappedValue.contains(traveller.id) }
         return selection.wrappedValue.isEmpty || selection.wrappedValue.contains(traveller.id)
     }
 
@@ -61,7 +69,7 @@ struct ParticipantPickerSheet: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Who's on this")
+                Text(singleSelection ? "Who's carrying this" : "Who's on this")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(AppTheme.ink)
 
@@ -72,7 +80,7 @@ struct ParticipantPickerSheet: View {
 
             Spacer(minLength: 8)
 
-            if let selection {
+            if let selection, !singleSelection {
                 Button(allSelected ? "Clear" : "Everyone") {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     withAnimation(.easeOut(duration: 0.2)) {
@@ -94,6 +102,10 @@ struct ParticipantPickerSheet: View {
 
     private var caption: String {
         let count = travellers.filter(isOn).count
+        if singleSelection {
+            guard let chosen = travellers.first(where: isOn) else { return "Pick one person" }
+            return "\(chosen.name) owes the full amount"
+        }
         guard let shareEach, shareEach > 0 else { return "\(count) of \(travellers.count)" }
         return "\(Money.format(shareEach, code: currencyCode)) each"
     }
@@ -110,6 +122,13 @@ struct ParticipantPickerSheet: View {
             guard let selection else { return }
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                guard !singleSelection else {
+                    // Radio behaviour, and no way back to nobody: tapping the
+                    // one that's already on is a mis-tap, not a deselection.
+                    selection.wrappedValue = [traveller.id]
+                    return
+                }
+
                 // An empty set has been standing in for "everyone", so the
                 // first tap has to make that implicit set explicit before it
                 // can take somebody out of it — otherwise deselecting one
@@ -135,7 +154,7 @@ struct ParticipantPickerSheet: View {
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(on ? AppTheme.ink : AppTheme.inkTertiary)
 
-                    if on, let shareEach, shareEach > 0 {
+                    if on, let shareEach, shareEach > 0, !singleSelection {
                         Text("owes \(Money.format(shareEach, code: currencyCode))")
                             .font(.system(size: 12))
                             .foregroundStyle(AppTheme.inkTertiary)
@@ -144,7 +163,7 @@ struct ParticipantPickerSheet: View {
 
                 Spacer(minLength: 6)
 
-                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                Image(systemName: on ? (singleSelection ? "largecircle.fill.circle" : "checkmark.circle.fill") : "circle")
                     .font(.system(size: 20))
                     .foregroundStyle(on ? AppTheme.accent : AppTheme.inkTertiary.opacity(0.4))
                     .symbolEffect(.bounce, value: on)

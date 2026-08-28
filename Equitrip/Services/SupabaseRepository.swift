@@ -210,8 +210,15 @@ final class SupabaseRepository {
             let travellers = tripMembers.compactMap { travellerByID[$0.profile_id] }
 
             let bookings = (itemsByTrip[row.id] ?? []).map { item in
-                item.asItineraryItem(
-                    participantIDs: Set((participantsByItem[item.id] ?? []).map(\.profile_id))
+                let rows = participantsByItem[item.id] ?? []
+                return item.asItineraryItem(
+                    participantIDs: Set(rows.map(\.profile_id)),
+                    // Only rows that actually carry a figure. A null `amount`
+                    // is the ordinary case — it means "this person is on the
+                    // booking", not "this person owes nothing".
+                    customShares: rows.reduce(into: [:]) { store, row in
+                        if let amount = row.amount { store[row.profile_id] = amount }
+                    }
                 )
             }
 
@@ -292,7 +299,7 @@ final class SupabaseRepository {
             .execute()
 
         let participants = items.flatMap { item in
-            item.participantIDs.map { ParticipantRow(item_id: item.id, profile_id: $0) }
+            item.participantIDs.map { ParticipantRow(item: item, profileID: $0) }
         }
         guard !participants.isEmpty else { return }
 
@@ -304,12 +311,23 @@ final class SupabaseRepository {
         try await client.from("item_participants").delete().eq("item_id", value: item.id).execute()
 
         guard !item.participantIDs.isEmpty else { return }
-        let rows = item.participantIDs.map { ParticipantRow(item_id: item.id, profile_id: $0) }
+        let rows = item.participantIDs.map { ParticipantRow(item: item, profileID: $0) }
         try await client.from("item_participants").insert(rows).execute()
     }
 
     func deleteItem(_ itemID: UUID) async throws {
         try await client.from("itinerary_items").delete().eq("id", value: itemID).execute()
+    }
+
+    /// Removes a trip outright.
+    ///
+    /// The bookings, membership, messages and participant rows all hang off
+    /// `trips` with `on delete cascade`, so this one statement takes the whole
+    /// graph with it. Deliberately not a "leave the trip" — that's a different
+    /// act with a different meaning, and conflating them is how somebody
+    /// stepping away from a holiday deletes everyone else's ledger.
+    func deleteTrip(_ tripID: UUID) async throws {
+        try await client.from("trips").delete().eq("id", value: tripID).execute()
     }
 
     /// Looks a trip up by invite code without needing membership — this is the
@@ -583,6 +601,20 @@ struct TripMemberRow: Codable {
 struct ParticipantRow: Codable {
     var item_id: UUID
     var profile_id: UUID
+    /// What this person owes on this booking, when the split is `.custom`.
+    ///
+    /// Null for every other mode, and that's the distinction that matters: a
+    /// null means "work it out from the cost", a zero means "somebody decided
+    /// this person owes nothing". Storing it here rather than as JSON on the
+    /// booking keeps it referentially tied to the participant row it belongs
+    /// to, so removing someone from a booking takes their figure with them.
+    var amount: Double?
+
+    init(item: ItineraryItem, profileID: UUID) {
+        item_id = item.id
+        profile_id = profileID
+        amount = item.split.isCustom ? (item.customShares[profileID] ?? 0) : nil
+    }
 }
 
 struct TripRow: Codable {
@@ -674,7 +706,7 @@ struct ItemRow: Codable {
         created_by = item.createdByID
     }
 
-    func asItineraryItem(participantIDs: Set<UUID>) -> ItineraryItem {
+    func asItineraryItem(participantIDs: Set<UUID>, customShares: [UUID: Double] = [:]) -> ItineraryItem {
         ItineraryItem(
             id: id,
             title: title,
@@ -683,8 +715,9 @@ struct ItemRow: Codable {
             date: SupabaseFormat.day.date(from: day) ?? Date(),
             time: start_time,
             cost: cost,
-            split: SplitMode(rawValue: split) ?? .equal,
+            split: SplitMode.decode(split),
             participantIDs: participantIDs,
+            customShares: customShares,
             photoQuery: photo_query,
             cover: cover_url.flatMap(URL.init(string:)).map {
                 TripPhoto(url: $0, thumbURL: $0, photographer: "", photographerURL: nil, sourceName: "")

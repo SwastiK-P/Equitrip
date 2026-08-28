@@ -162,6 +162,33 @@ final class TripStore {
             ?? trips.filter { $0.phase == .upcoming }.min { $0.startDate < $1.startDate }
     }
 
+    /// Deletes a trip for everybody on it.
+    ///
+    /// Removed from the list first so the screen answers immediately, and only
+    /// put back if the server refuses — a delete that appears to work and then
+    /// silently doesn't is worse than one that visibly fails, because the next
+    /// sync resurrects a trip somebody believed they had got rid of.
+    func delete(_ tripID: UUID) {
+        guard let index = trips.firstIndex(where: { $0.id == tripID }) else { return }
+
+        let removed = trips[index]
+        trips.remove(at: index)
+        itineraryPath.removeAll { $0 == tripID }
+        if selectedTripID == tripID { selectedTripID = currentTrip?.id ?? trips.first?.id }
+
+        notifier?.announceTripDeleted(removed)
+
+        Task {
+            do {
+                try await SupabaseRepository.shared.deleteTrip(tripID)
+                writeFailure = nil
+            } catch {
+                trips.insert(removed, at: min(index, trips.count))
+                writeFailure = "\(removed.title) couldn't be deleted. \(AuthService.message(for: error))"
+            }
+        }
+    }
+
     func update(_ trip: Trip) {
         guard let index = trips.firstIndex(where: { $0.id == trip.id }) else { return }
         trips[index] = trip
@@ -195,8 +222,21 @@ final class TripStore {
         write { try await SupabaseRepository.shared.deleteItem(itemID) }
     }
 
+    /// Adds a booking, or replaces it if it's already here.
+    ///
+    /// Upsert rather than append because the callers save twice: the editor and
+    /// quick add both write the booking straight away and then write it again a
+    /// moment later with the category and glyph the model worked out. Appending
+    /// blindly turned every classified booking into two.
     func addItem(_ item: ItineraryItem, to tripID: UUID) {
         guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }) else { return }
+
+        if let existing = trips[tripIndex].items.firstIndex(where: { $0.id == item.id }) {
+            trips[tripIndex].items[existing] = item
+            write { try await SupabaseRepository.shared.upsertItem(item, tripID: tripID) }
+            return
+        }
+
         trips[tripIndex].items.append(item)
         // A booking outside the current span widens the trip rather than
         // falling off the end of the timeline.

@@ -27,6 +27,18 @@ struct HomeView: View {
     @State private var showProfile = false
     @State private var showNewTrip = false
     @State private var showChat = false
+    /// The trip a quick expense would land on. Set when the shortcut is
+    /// tapped, which is also what presents the sheet.
+    @State private var quickAddTrip: Trip?
+    /// The handover from quick to the full editor, which needs both the trip
+    /// and what was typed.
+    @State private var detailedAdd: DetailedAdd?
+
+    private struct DetailedAdd: Identifiable {
+        let trip: Trip
+        let seed: ItineraryItem
+        var id: UUID { seed.id }
+    }
     /// Which trips the hero's figures cover. Nil is the whole portfolio.
     @State private var balanceTripID: UUID?
 
@@ -108,6 +120,32 @@ struct HomeView: View {
             if let trip = store.currentTrip {
                 TripChatView(trip: trip)
             }
+        }
+        .sheet(item: $quickAddTrip) { trip in
+            QuickAddSheet(
+                travellers: trip.travellers,
+                currencyCode: trip.currencyCode,
+                day: Calendar.current.startOfDay(for: Date()),
+                onSave: { store.addItem($0, to: trip.id) },
+                // Home has no itinerary stack to hand off to, so the full
+                // editor opens over it in the same place.
+                onSwitchToDetailed: { partial in
+                    quickAddTrip = nil
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(320))
+                        detailedAdd = DetailedAdd(trip: trip, seed: partial)
+                    }
+                }
+            )
+        }
+        .sheet(item: $detailedAdd) { pending in
+            ItineraryItemEditor(
+                item: pending.seed,
+                travellers: pending.trip.travellers,
+                currencyCode: pending.trip.currencyCode,
+                isNew: true,
+                onSave: { store.addItem($0, to: pending.trip.id) }
+            )
         }
         .fullScreenCover(isPresented: $showNewTrip) {
             NewTripFlow { draft in
@@ -432,6 +470,7 @@ struct HomeView: View {
                         switch action.title {
                         case "New trip": showNewTrip = true
                         case "Chat": showChat = store.currentTrip != nil
+                        case "Expense": quickAddTrip = liveTrip
                         default: break
                         }
                     } label: {
@@ -457,9 +496,24 @@ struct HomeView: View {
         }
     }
 
-    /// Chat belongs to a trip, so it's dimmed until there is one.
+    /// The trip a "log this now" expense belongs to.
+    ///
+    /// Has to be one that's actually running. Quick add stamps the current
+    /// date and time onto whatever it creates, which is only true of a trip
+    /// you're on — filing today's beach snacks against a trip that starts in
+    /// three weeks puts a booking on a day the trip doesn't have.
+    private var liveTrip: Trip? {
+        store.trips.first { $0.phase == .live }
+    }
+
+    /// Both of these belong to a trip, so they're dimmed until there's one to
+    /// belong to — Chat to any trip, Expense to one that's under way.
     private func isEnabled(_ action: QuickAction) -> Bool {
-        action.title == "Chat" ? store.currentTrip != nil : true
+        switch action.title {
+        case "Chat": store.currentTrip != nil
+        case "Expense": liveTrip != nil
+        default: true
+        }
     }
 
     // MARK: - Current trip

@@ -23,3 +23,5 @@ Package.pins
 supabase/.branches/
 supabase/.temp/
 supabase/migrations/
+
+EQUITRIP_MASTER_DOC.md

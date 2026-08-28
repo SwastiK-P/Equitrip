@@ -86,7 +86,12 @@ struct TravellerPickerSheet: View {
                     .foregroundStyle(AppTheme.inkTertiary)
                     .frame(width: 18)
 
-                TextField("their@email.com", text: $newEmail)
+                // Not a specimen address. "their@email.com" reads as a real
+                // value somebody left in the field rather than as a prompt,
+                // and iOS renders an address-shaped placeholder in a way that
+                // looks tappable — so it said what to type at the cost of
+                // looking like it had already been typed.
+                TextField("Add a traveller by email", text: $newEmail)
                     .font(.system(size: 16))
                     .foregroundStyle(AppTheme.ink)
                     .keyboardType(.emailAddress)

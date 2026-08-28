@@ -149,8 +149,8 @@ struct TimelineRow: View {
                     .foregroundStyle(AppTheme.ink)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if !item.vendor.isEmpty {
-                    Text(item.vendor)
+                if let vendor = item.vendorName {
+                    Text(vendor)
                         .font(.system(size: 12.5))
                         .foregroundStyle(AppTheme.inkSecondary)
                         .lineLimit(1)

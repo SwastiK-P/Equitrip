@@ -16,13 +16,16 @@ import SwiftUI
 /// - **Itinerary** is the master plan. Participants are edited per booking
 ///   here, which is where the question is actually asked ("who's on this?"),
 ///   so there's no standalone People tab either.
-/// - **Expenses** is the ledger: what was spent, with whom, on which split
-///   model, plus refunds and cancellations.
 /// - **Settle** is the payoff — who owes whom, minimised, and the payment
-///   record. It stays separate from Expenses because it's the one screen a
-///   participant opens without wanting to see the whole ledger.
+///   record. It's the one screen a participant opens without wanting to see a
+///   trip at all, which is why it's the only money screen still up here.
+///
+/// There is deliberately no Expenses tab. A trip is the container: its plan,
+/// its people and its money are three questions about one thing, and a global
+/// ledger has to open by asking which trip you meant — a question you answered
+/// by opening a trip. It lives inside the trip now, as `TripLedger`.
 enum AppTab: Hashable {
-    case home, itinerary, expenses, settle
+    case home, itinerary, settle
 }
 
 struct RootTabView: View {
@@ -65,10 +68,6 @@ struct RootTabView: View {
                                 .tripZoomDestination(tripID, in: tripZoom)
                         }
                 }
-            }
-
-            Tab("Expenses", systemImage: "creditcard.fill", value: AppTab.expenses) {
-                ExpensesView()
             }
 
             Tab("Settle", systemImage: "arrow.left.arrow.right", value: AppTab.settle) {

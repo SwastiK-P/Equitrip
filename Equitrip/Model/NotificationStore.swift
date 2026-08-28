@@ -236,6 +236,26 @@ extension NotificationStore {
         )
     }
 
+    /// The whole trip, gone. Worth telling everyone: their share of it goes
+    /// with it, and a trip that simply vanishes from the list with no
+    /// explanation is indistinguishable from a bug.
+    func announceTripDeleted(_ trip: Trip) {
+        let recipients = audience(of: trip)
+        guard !recipients.isEmpty else { return }
+
+        post(
+            AppNotification(
+                kind: .bookingRemoved,
+                title: "\(actor()) deleted \(trip.title)",
+                body: trip.items.isEmpty
+                    ? "The trip is gone. Nothing was booked on it."
+                    : "\(trip.items.count.pluralised("booking")) went with it, and any balance on it no longer applies.",
+                tripID: trip.id
+            ),
+            to: recipients
+        )
+    }
+
     func announceBookingRemoved(_ item: ItineraryItem, from trip: Trip) {
         let recipients = audience(of: trip)
         guard !recipients.isEmpty else { return }

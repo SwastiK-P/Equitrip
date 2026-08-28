@@ -28,6 +28,10 @@ struct ItineraryItemDetailView: View {
     @State private var payerDraft: UUID?
     @State private var methodDraft: PaymentMethod?
     @State private var receiptDraft: URL?
+    /// Whether the payment row is showing its receipt.
+    @State private var showsReceipt = false
+    /// The receipt being viewed full screen.
+    @State private var previewing: ReceiptRef?
 
     private var participants: [Traveller] { trip.participants(of: item) }
     private var shares: [(traveller: Traveller, amount: Double)] { trip.shares(of: item) }
@@ -53,8 +57,14 @@ struct ItineraryItemDetailView: View {
                 facts
 
                 if item.cost > 0 {
-                    costBreakdown
+                    // Payer first, sharing second. The two answer "whose money
+                    // was this?" and "whose cost is it?", and they only make
+                    // sense in that order — the split divides a sum somebody
+                    // has already handed over, so reading the division before
+                    // knowing whether anyone paid is reading the second half of
+                    // a sentence first.
                     paidBy
+                    costBreakdown
                 }
 
                 who
@@ -80,6 +90,9 @@ struct ItineraryItemDetailView: View {
                 shareEach: shares.first?.amount,
                 currencyCode: trip.currencyCode
             )
+        }
+        .fullScreenCover(item: $previewing) { receipt in
+            ReceiptPreview(url: receipt.url, caption: receiptCaption)
         }
         .sheet(isPresented: $showPayment, onDismiss: commitPayment) {
             PaymentSheet(
@@ -176,8 +189,12 @@ struct ItineraryItemDetailView: View {
                         .foregroundStyle(AppTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if !item.vendor.isEmpty {
-                        Text(item.vendor)
+                    // Trimmed, not just non-empty. A vendor of " " passes
+                    // `isEmpty` and renders as a blank line under the title —
+                    // a gap where a name should be, which reads as something
+                    // failing to load rather than as nothing to show.
+                    if let vendor = item.vendorName {
+                        Text(vendor)
                             .font(.system(size: 14))
                             .foregroundStyle(AppTheme.inkSecondary)
                     }
@@ -266,14 +283,23 @@ struct ItineraryItemDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 13)
 
-                // Per person, not just "₹2,666.67 each". A single "each"
-                // figure is the right number and the wrong answer to the
-                // question people actually arrive with, which is what *they*
-                // owe — and under "By room" or "Individual" the two aren't the
-                // same thing for everybody on the list.
-                ForEach(shares, id: \.traveller.id) { entry in
+                // Per person — but only where the people differ.
+                //
+                // Under an equal split every row carries the same number, and
+                // three identical lines of "₹466.67" don't answer a question
+                // anybody had; they just make you read three times to learn
+                // one thing. Where the shares actually vary — by participant,
+                // exact amounts, one person carrying it — the list is the
+                // whole point, because what *you* owe is the thing people
+                // arrive at this screen to check.
+                if item.split == .equal {
                     Hairline(inset: 16)
-                    shareRow(entry.traveller, entry.amount)
+                    evenShare
+                } else {
+                    ForEach(shares, id: \.traveller.id) { entry in
+                        Hairline(inset: 16)
+                        shareRow(entry.traveller, entry.amount)
+                    }
                 }
 
                 if shares.isEmpty {
@@ -287,6 +313,30 @@ struct ItineraryItemDetailView: View {
                 }
             }
             .cardSurface(corner: 20)
+        }
+    }
+
+    /// The collapsed form: one line, everybody's faces, one figure.
+    @ViewBuilder
+    private var evenShare: some View {
+        if let each = shares.first?.amount {
+            HStack(spacing: 12) {
+                AvatarStack(travellers: shares.map(\.traveller), size: 28, max: 5)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(Money.format(each, code: trip.currencyCode)) each")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AppTheme.ink)
+
+                    Text("across \(shares.count.pluralised("person", "people")) on the trip")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppTheme.inkTertiary)
+                }
+
+                Spacer(minLength: 6)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
     }
 
@@ -310,80 +360,242 @@ struct ItineraryItemDetailView: View {
         .padding(.vertical, 11)
     }
 
-    /// Whose money it was. Tappable for everyone, not just organisers: the
-    /// person who paid for dinner is rarely the person who made the trip.
+    /// Whose money it was.
+    ///
+    /// Open to everyone, not just organisers — the person who paid for dinner
+    /// is rarely the person who organised the trip.
+    ///
+    /// The row discloses rather than navigating. The receipt used to hang
+    /// underneath permanently, which put a photograph of a restaurant bill in
+    /// the middle of the booking whether anyone wanted it or not, and made the
+    /// section taller than everything else on the screen. It's evidence, and
+    /// evidence should be one tap away rather than always on display. Tapping
+    /// the row itself no longer opens the payment editor either: that was a
+    /// destination hiding behind a row that looked like a summary, and it meant
+    /// there was no way to *look* at a payment without being taken somewhere to
+    /// change it.
     private var paidBy: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionLabel("Paid by")
 
-            Button {
-                guard onRecordPayment != nil else { return }
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                payerDraft = item.paidByID
-                methodDraft = item.paymentMethod
-                receiptDraft = item.receiptURL
-                showPayment = true
-            } label: {
-                VStack(spacing: 0) {
-                    HStack(spacing: 12) {
-                        if let payer = item.paidByID.flatMap(trip.traveller) {
-                            MemojiAvatar(traveller: payer, size: 34)
+            VStack(spacing: 0) {
+                if item.paidByID == nil {
+                    unpaidRow
+                } else {
+                    payerRow
 
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(payer.id == Traveller.you.id ? "You paid" : "\(payer.name) paid")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(AppTheme.ink)
-
-                                Text(methodLine)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(AppTheme.inkTertiary)
-                            }
-                        } else {
-                            SymbolBadge(symbol: "creditcard", tint: AppTheme.accent, size: 34)
-
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("Nobody's paid yet")
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(AppTheme.ink)
-
-                                Text(onRecordPayment == nil ? "Not recorded" : "Tap to record who did")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(AppTheme.inkTertiary)
-                            }
-                        }
-
-                        Spacer(minLength: 6)
-
-                        if onRecordPayment != nil {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(AppTheme.inkTertiary)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 13)
-
-                    if let receipt = item.receiptURL {
+                    if showsReceipt {
                         Hairline(inset: 16)
-
-                        AsyncImage(url: receipt) { phase in
-                            if case let .success(image) = phase {
-                                image.resizable().scaledToFit()
-                            } else {
-                                Color.clear.frame(height: 80)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(maxHeight: 220)
-                        .padding(.bottom, 4)
+                        receiptPanel
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
-                .contentShape(.rect)
             }
-            .buttonStyle(PressableButtonStyle())
-            .disabled(onRecordPayment == nil)
+            // Clip the *content*, then lay the card surface behind it.
+            //
+            // The other way round — `.cardSurface` then `.clipped()` — was
+            // clipping the surface's own shadow to the card's bounds, which
+            // turned a soft lift into a hard-edged grey box drawn tight around
+            // the card, and did the same to the glass button inside it. The
+            // clip is only here to stop the receipt panel spilling past the
+            // rounded corners as it expands, so it belongs on the thing that
+            // expands rather than on everything.
+            .clipShape(.rect(cornerRadius: 20, style: .continuous))
             .cardSurface(corner: 20)
         }
+    }
+
+    /// Nothing recorded yet — so the row is the call to action it looks like.
+    private var unpaidRow: some View {
+        Button {
+            guard onRecordPayment != nil else { return }
+            openPayment()
+        } label: {
+            HStack(spacing: 12) {
+                SymbolBadge(symbol: "creditcard", tint: AppTheme.accent, size: 34)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Nobody's paid yet")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(AppTheme.ink)
+
+                    Text(onRecordPayment == nil ? "Not recorded" : "Tap to record who did")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppTheme.inkTertiary)
+                }
+
+                Spacer(minLength: 6)
+
+                if onRecordPayment != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AppTheme.inkTertiary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .contentShape(.rect)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .disabled(onRecordPayment == nil)
+    }
+
+    private var payerRow: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
+                showsReceipt.toggle()
+            }
+        } label: {
+            HStack(spacing: 12) {
+                if let payer = item.paidByID.flatMap(trip.traveller) {
+                    MemojiAvatar(traveller: payer, size: 34)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(payer.id == Traveller.you.id ? "You paid" : "\(payer.name) paid")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(AppTheme.ink)
+
+                        Text(methodLine)
+                            .font(.system(size: 12))
+                            .foregroundStyle(AppTheme.inkTertiary)
+                    }
+                }
+
+                Spacer(minLength: 6)
+
+                Text(Money.format(item.cost, code: trip.currencyCode))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.ink)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(AppTheme.inkTertiary)
+                    .rotationEffect(.degrees(showsReceipt ? 180 : 0))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .contentShape(.rect)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .accessibilityHint(showsReceipt ? "Hide payment details" : "Show payment details")
+    }
+
+    /// What's behind the arrow: the receipt if there is one, the fact that
+    /// there isn't if there isn't, and the way to change either.
+    private var receiptPanel: some View {
+        VStack(spacing: 12) {
+            if let receipt = item.receiptURL {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    previewing = ReceiptRef(url: receipt)
+                } label: {
+                    AsyncImage(url: receipt, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+
+                        case .failure:
+                            receiptPlaceholder(symbol: "exclamationmark.triangle", text: "Couldn't load it")
+
+                        default:
+                            receiptPlaceholder(symbol: "doc.text.image", text: "Loading…")
+                        }
+                    }
+                    .frame(height: 190)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(.rect(cornerRadius: 16, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(AppTheme.cardStroke.opacity(0.08))
+                    }
+                    // A photographed bill is usually unreadable at this size,
+                    // so the affordance says so rather than leaving people to
+                    // discover that it's tappable.
+                    .overlay(alignment: .bottomTrailing) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Tap to read")
+                                .font(.system(size: 11.5, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.45), in: .capsule)
+                        .padding(10)
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(PressableButtonStyle())
+            } else {
+                HStack(spacing: 10) {
+                    Image(systemName: "doc.text.image")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(AppTheme.inkTertiary)
+
+                    Text(
+                        item.paymentMethod?.isOnline == false
+                            ? "Cash — nothing to attach."
+                            : "No receipt attached."
+                    )
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppTheme.inkSecondary)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 4)
+            }
+
+            if onRecordPayment != nil {
+                Button(action: openPayment) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(item.receiptURL == nil ? "Edit payment" : "Change payment or receipt")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                }
+                .buttonStyle(.glass)
+                .tint(AppTheme.accent)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 13)
+        .padding(.bottom, 14)
+    }
+
+    private func receiptPlaceholder(symbol: String, text: String) -> some View {
+        ZStack {
+            AppTheme.canvasBottom.opacity(0.5)
+
+            VStack(spacing: 7) {
+                Image(systemName: symbol)
+                    .font(.system(size: 20, weight: .light))
+                Text(text)
+                    .font(.system(size: 12.5))
+            }
+            .foregroundStyle(AppTheme.inkTertiary)
+        }
+    }
+
+    private func openPayment() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        payerDraft = item.paidByID
+        methodDraft = item.paymentMethod
+        receiptDraft = item.receiptURL
+        showPayment = true
+    }
+
+    /// Read under the receipt when it's open full screen, so the image can be
+    /// checked against the claim without going back for it.
+    private var receiptCaption: String {
+        let payer = item.paidByID.flatMap(trip.traveller)
+        let name = payer.map { $0.id == Traveller.you.id ? "You" : $0.name } ?? "Someone"
+        let method = item.paymentMethod.map { " · \($0.label)" } ?? ""
+        return "\(name) paid \(Money.format(item.cost, code: trip.currencyCode))\(method)"
     }
 
     private var methodLine: String {

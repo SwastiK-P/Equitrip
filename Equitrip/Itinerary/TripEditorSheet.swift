@@ -21,12 +21,19 @@ struct TripEditorSheet: View {
     @State private var showLocationPicker = false
     @State private var showCurrencyPicker = false
     @State private var coverItem: PhotosPickerItem?
+    @State private var confirmingDelete = false
 
     var onSave: (Trip) -> Void
+    /// Nil where deleting isn't on offer. Passed in rather than reaching for
+    /// the store, so the caller owns what happens to the screen it was pushed
+    /// from — a trip deleted from inside its own itinerary has to pop that
+    /// itinerary too.
+    var onDelete: (() -> Void)?
 
-    init(trip: Trip, onSave: @escaping (Trip) -> Void) {
+    init(trip: Trip, onSave: @escaping (Trip) -> Void, onDelete: (() -> Void)? = nil) {
         _draft = State(initialValue: trip)
         self.onSave = onSave
+        self.onDelete = onDelete
     }
 
     private var canSave: Bool {
@@ -49,6 +56,8 @@ struct TripEditorSheet: View {
                 dates
                 currency
                 travellers
+
+                if onDelete != nil { deleteButton }
 
                 Color.clear.frame(height: 10)
             }
@@ -99,6 +108,52 @@ struct TripEditorSheet: View {
         .padding(.horizontal, 20)
         .padding(.top, 20)
         .padding(.bottom, 12)
+    }
+
+    /// Deleting takes the trip away from everyone on it, so it asks — and the
+    /// dialog names the trip rather than saying "this item", because the whole
+    /// risk here is deleting the wrong one.
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            confirmingDelete = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "trash")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Delete trip")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .foregroundStyle(AppTheme.danger)
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .panelSurface(corner: 18)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .padding(.top, 4)
+        .confirmationDialog(
+            "Delete \(draft.title)?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete trip", role: .destructive) {
+                onDelete?()
+                dismiss()
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text(deleteWarning)
+        }
+    }
+
+    private var deleteWarning: String {
+        let bookings = draft.items.count
+        let people = draft.travellers.count
+
+        if bookings == 0 {
+            return "This removes the trip for everyone on it. It can't be undone."
+        }
+        return "\(bookings.pluralised("booking")) and any balance between \(people.pluralised("traveller")) go with it. This can't be undone."
     }
 
     private var saveBar: some View {
