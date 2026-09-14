@@ -75,6 +75,12 @@ struct TripChatView: View {
                         Color.clear.frame(height: 6).id(Self.bottomAnchor)
                     }
                     .padding(.horizontal, 14)
+                    // A group thread is a column of speech, and speech reads
+                    // badly at 1200pt: a bubble that wide puts the sender's
+                    // avatar and the end of their sentence a foot apart, and
+                    // a run of one-word replies turns into a stack of tiny
+                    // capsules stranded in a field of peach.
+                    .readableWidth()
                     .padding(.top, 8)
                 }
                 .scrollDismissesKeyboard(.interactively)
@@ -168,9 +174,10 @@ struct TripChatView: View {
 
             Spacer(minLength: 6)
 
-            AvatarStack(travellers: trip.travellers, size: 28, max: 3)
+            AvatarStack(travellers: trip.travellers, size: 28, max: 3, departedIDs: trip.departedIDs)
         }
         .padding(.horizontal, 18)
+        .readableWidth()
         .padding(.top, 6)
         .padding(.bottom, 10)
     }
@@ -307,6 +314,7 @@ struct TripChatView: View {
             }
         }
         .padding(.horizontal, 14)
+        .readableWidth()
         .padding(.top, 8)
         .padding(.bottom, 8)
         .animation(.spring(response: 0.28, dampingFraction: 0.75), value: canSend)
@@ -532,7 +540,7 @@ private struct ChatBubbleRow: View {
     private var gutter: some View {
         Group {
             if run.isLast, let face = message.isMine ? Traveller.you : author {
-                MemojiAvatar(traveller: face, size: 26)
+                TravellerAvatar(traveller: face, size: 26)
             } else {
                 Color.clear
             }
@@ -742,7 +750,7 @@ private struct TypingBubble: View {
             // an anonymous bubble floating in the avatar column.
             Group {
                 if let first = people.first {
-                    MemojiAvatar(traveller: first, size: 26)
+                    TravellerAvatar(traveller: first, size: 26)
                 } else {
                     Color.clear
                 }

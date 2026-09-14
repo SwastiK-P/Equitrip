@@ -179,7 +179,7 @@ struct TravellerChip: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            MemojiAvatar(traveller: traveller, size: 24)
+            TravellerAvatar(traveller: traveller, size: 24)
 
             Text(traveller.name)
                 .font(.system(size: 13.5, weight: .medium))

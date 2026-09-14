@@ -170,20 +170,41 @@ struct QRBurst: View {
 
     // MARK: Timing
 
-    /// Four beats. Tuned on device, and the windows are narrow: a tenth of a
-    /// second quicker and the code is gone before you've registered that it's
-    /// yours, a tenth slower and you're waiting for an animation rather than
-    /// watching one.
+    /// Four beats, just under two seconds end to end.
+    ///
+    /// Slower than the reflex says it should be, and deliberately. The scan is
+    /// the only moment in the app where something the camera found becomes
+    /// something the app has — and it's covering a network call anyway, so the
+    /// time is being spent either way. Run quick, all four beats blur into a
+    /// flash and the code you actually scanned is never legible on screen; run
+    /// at this pace, each beat is separately readable: it landed *there*, it
+    /// came to the middle, it let go, it filled the screen.
     ///
     /// `form` earns its own beat rather than overlapping the travel. The code
     /// used to paint on *while* it was already flying to the middle, which
     /// meant the one moment worth seeing — the white code sitting exactly on
     /// the real one, at the real one's angle — never actually happened. It has
     /// to land, be still, and be recognised before it goes anywhere.
-    private static let form: Double = 0.26
-    private static let travel: Double = 0.42
-    private static let hold: Double = 0.07
-    private static let fly: Double = 0.68
+    private static let form: Double = 0.36
+    private static let travel: Double = 0.58
+    // The pause is doing work, not padding. It's the only frame where the code
+    // is square, still and centred — the one chance to read it as the code you
+    // scanned rather than as something in motion — and coming straight off the
+    // travel into the burst threw that away.
+    private static let hold: Double = 0.28
+    private static let fly: Double = 1.30
+
+    /// How long a module takes to cross the frame — the burst's *speed*, held
+    /// separate from `fly`, which is only how long the burst is allowed to run.
+    ///
+    /// They were the same number, and that made the two impossible to tune
+    /// independently: depth was a fraction of the window, so stretching the
+    /// window slowed every particle down in exact proportion. Lengthening the
+    /// burst made it more sluggish rather than longer. Pinning the pace to
+    /// seconds means the modules keep the speed they had and simply carry on
+    /// coming — further out, larger, for longer — which is the difference
+    /// between a slower animation and more of one.
+    private static let flightPace: Double = 0.92
 
     private static var travelStart: Double { form }
     private static var burstStart: Double { form + travel + hold }
@@ -294,11 +315,17 @@ struct QRBurst: View {
             let entrance = easeOut(progress(landed, particle.radius * 0.55, 1))
             guard entrance > 0.001 else { continue }
 
-            let local = progress(t, Self.burstStart + particle.delay, Self.total)
+            // Seconds since this module let go, not a fraction of the burst.
+            let elapsed = max(0, t - (Self.burstStart + particle.delay))
 
             // While it's still seated there's nothing for a halo to do but
             // bleed across the module next door and turn the pattern to mush.
-            if halo && local <= 0 { continue }
+            if halo && elapsed <= 0 { continue }
+
+            // Unclamped on purpose: past 1 the fastest modules are through the
+            // lens and still growing, which is what keeps the tail of the
+            // burst moving instead of freezing into a held frame.
+            let travelled = elapsed / Self.flightPace
 
             // Perspective, rather than "move outward and also get bigger".
             //
@@ -316,14 +343,14 @@ struct QRBurst: View {
             // of its range and everything at the end; squaring the input on
             // top of that put the entire visible effect into the last few
             // frames, which were the ones already under the white.
-            let z = min(0.96, pow(local, 0.85) * particle.rate)
+            let z = min(0.96, pow(travelled, 0.85) * particle.rate)
             let projection = 1 / (1 - z)
 
             // A little lateral wander, so a hundred modules travelling the
             // same depth don't move in lockstep.
             let drift = CGVector(
-                dx: particle.drift.dx * local * 26,
-                dy: particle.drift.dy * local * 26
+                dx: particle.drift.dx * min(1.4, travelled) * 26,
+                dy: particle.drift.dy * min(1.4, travelled) * 26
             )
 
             let cell = quad.cell(
@@ -430,7 +457,7 @@ struct QRBurst: View {
                         drift: CGVector(dx: (b - 0.5) * 2, dy: (hash(row &* 31 &+ column) - 0.5) * 2),
                         // Outermost leaves first: the code peels apart from its
                         // edges rather than everything going at once.
-                        delay: (1 - radius) * 0.10 + b * 0.04
+                        delay: (1 - radius) * 0.15 + b * 0.05
                     )
                 )
             }

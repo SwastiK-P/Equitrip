@@ -25,6 +25,7 @@ struct TripBasicsStage: View {
     @State private var showTravellerPicker = false
     @State private var showLocationPicker = false
     @State private var showCurrencyPicker = false
+    @State private var showImageSource = false
     @State private var editingDate: DateSlot?
     @State private var appeared = false
 
@@ -83,7 +84,29 @@ struct TripBasicsStage: View {
                 if draft.title.trimmingCharacters(in: .whitespaces).isEmpty {
                     draft.title = picked.components(separatedBy: ",")[0]
                 }
+                // The old cover, if any, was fetched for the old place.
+                draft.cover = nil
             }
+        }
+        .sheet(isPresented: $showImageSource) {
+            ImageSourceSheet(
+                suggestedQuery: draft.destination.isEmpty ? draft.title : draft.destination,
+                onPickUnsplash: { photo in
+                    let tripID = draft.id
+                    Task {
+                        let stored = await CoverStore.shared.persist(photo, for: tripID)
+                        draft.cover = stored
+                    }
+                },
+                onPickLibrary: { data in
+                    let tripID = draft.id
+                    Task {
+                        if let stored = await CoverStore.shared.persist(imageData: data, for: tripID) {
+                            draft.cover = stored
+                        }
+                    }
+                }
+            )
         }
         .onChange(of: draft.startDate) { _, start in
             // Keep the range valid without silently discarding a longer trip.
@@ -100,6 +123,7 @@ struct TripBasicsStage: View {
     private var livePreview: some View {
         DestinationImage(
             query: draft.destination.count >= 3 ? draft.destination : nil,
+            photo: draft.cover,
             fallbackSymbol: draft.inferredSymbol,
             fallbackTint: draft.inferredTint,
             onResolve: { draft.cover = $0 }
@@ -144,6 +168,25 @@ struct TripBasicsStage: View {
             .lineLimit(1)
             .shadow(color: .black.opacity(0.45), radius: 6, y: 1)
             .padding(16)
+        }
+        .overlay(alignment: .topTrailing) {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showImageSource = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Change")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.black.opacity(0.4), in: .capsule)
+                .padding(14)
+            }
+            .buttonStyle(.plain)
         }
         .clipShape(.rect(cornerRadius: 24, style: .continuous))
         .shadow(color: AppTheme.softShadow(.light), radius: 14, y: 6)
@@ -459,6 +502,10 @@ private struct DateSlotSheet: View {
             .labelsHidden()
             .tint(AppTheme.accent)
             .padding(.horizontal, 12)
+            // The graphical picker draws its own month header flush against
+            // its top edge, which — with no gap here — got clipped under the
+            // sheet's own title row instead of sitting below it.
+            .padding(.top, 6)
 
             Spacer(minLength: 0)
         }

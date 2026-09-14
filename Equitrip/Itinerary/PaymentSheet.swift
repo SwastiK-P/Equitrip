@@ -115,7 +115,7 @@ struct PaymentSheet: View {
             if method == nil { method = AppSettings.defaultPaymentMethod }
         } label: {
             HStack(spacing: 12) {
-                MemojiAvatar(traveller: traveller, size: 36)
+                TravellerAvatar(traveller: traveller, size: 36)
 
                 Text(traveller.id == Traveller.you.id ? "\(traveller.name) (you)" : traveller.name)
                     .font(.system(size: 15, weight: .medium))

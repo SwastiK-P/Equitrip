@@ -24,6 +24,16 @@ enum Money {
         return magnitude
     }
 
+    /// The bare number, for a text field somebody is about to edit.
+    /// `480` rather than `480.0`, `479.5` rather than `479.50` — a grouping
+    /// separator or a trailing zero in a `.decimalPad` field is one more thing
+    /// to delete before typing.
+    static func plainAmount(_ amount: Double) -> String {
+        amount.rounded() == amount
+            ? String(Int(amount.rounded()))
+            : String(format: "%.2f", amount)
+    }
+
     static func symbol(for code: String) -> String {
         switch code.uppercased() {
         case "INR": "₹"
@@ -96,6 +106,31 @@ enum ItineraryKind: String, CaseIterable, Identifiable, Codable {
         default: .equal
         }
     }
+
+    /// Whether the price moves when the headcount does.
+    ///
+    /// Only asked when somebody leaves mid-trip, and it's the question that
+    /// decides whether their departure costs anybody else money. Four people
+    /// paying for four train tickets pay less when one of them doesn't go;
+    /// four people paying for one villa do not. Getting this backwards is how
+    /// a group ends up quietly absorbing somebody's share without ever being
+    /// told — see `DeparturePlan.adjustedItems`.
+    ///
+    /// Derived from the category rather than stored, for the same reason
+    /// `defaultSplit` is: it's right often enough to be a good default and
+    /// there's a visible number next to it when it isn't.
+    var costBasis: CostBasis {
+        switch self {
+        // A room and a car are booked once, whoever ends up in them.
+        case .stay, .drive: .fixed
+        default: .perPerson
+        }
+    }
+}
+
+/// Whether a booking's price is per head or for the booking.
+enum CostBasis: String, Codable, Hashable {
+    case perPerson, fixed
 }
 
 // MARK: - Cost sharing
@@ -259,6 +294,18 @@ struct ItineraryItem: Identifiable, Hashable {
     /// question is who entered it.
     var createdByID: UUID?
     var createdAt: Date
+    /// True when someone has disputed the payment recorded on this item.
+    var isDisputed: Bool
+    /// Who raised the dispute.
+    var disputedByID: UUID?
+    /// When the dispute was opened.
+    var disputedAt: Date?
+    /// Why it was disputed (e.g. amount mismatch, wrong payer).
+    var disputeReason: String?
+    /// When the dispute was marked resolved.
+    var disputeResolvedAt: Date?
+    /// Who marked it resolved.
+    var disputeResolvedByID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -279,7 +326,13 @@ struct ItineraryItem: Identifiable, Hashable {
         paymentMethod: PaymentMethod? = nil,
         receiptURL: URL? = nil,
         createdByID: UUID? = nil,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        isDisputed: Bool = false,
+        disputedByID: UUID? = nil,
+        disputedAt: Date? = nil,
+        disputeReason: String? = nil,
+        disputeResolvedAt: Date? = nil,
+        disputeResolvedByID: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -300,6 +353,12 @@ struct ItineraryItem: Identifiable, Hashable {
         self.receiptURL = receiptURL
         self.createdByID = createdByID ?? Traveller.you.id
         self.createdAt = createdAt
+        self.isDisputed = isDisputed
+        self.disputedByID = disputedByID
+        self.disputedAt = disputedAt
+        self.disputeReason = disputeReason
+        self.disputeResolvedAt = disputeResolvedAt
+        self.disputeResolvedByID = disputeResolvedByID
     }
 
     // Equality is memberwise on purpose — do not narrow it back to `id`.
@@ -386,6 +445,24 @@ struct Trip: Identifiable {
     var tint: Color
     var travellers: [Traveller]
     var items: [ItineraryItem]
+    /// Direct transfers between travellers, outside any one booking. See
+    /// `SettlementEngine` — this is the raw record; the minimised "who pays
+    /// whom" list is computed from it plus the booking ledger.
+    var settlements: [Settlement]
+    /// People who have left, and the frozen arithmetic that closed their side
+    /// of the trip. See `TripDeparture` — nobody is ever removed from
+    /// `travellers`, because the ledger points at them from both directions;
+    /// they acquire an end date instead.
+    var departures: [TripDeparture]
+    /// People who have been asked and haven't answered yet.
+    ///
+    /// They're in `travellers` — the organiser who invited them needs to see
+    /// them on the list, marked as pending — but they are on the trip in name
+    /// only until they accept. `bearers(of:)` skips them entirely, so an
+    /// invitation changes nobody's share of anything. That's the whole point:
+    /// being on a trip means owing money, and nobody should be made to owe
+    /// money by somebody else typing their email address.
+    var invitedIDs: Set<UUID>
     /// Who can edit the trip. Usually the person who made it, but a long trip
     /// is rarely organised alone — the flights are someone's job and the
     /// villa is someone else's — so this is a set rather than a single holder.
@@ -416,6 +493,9 @@ struct Trip: Identifiable {
         tint: Color = AppTheme.accent,
         travellers: [Traveller] = [],
         items: [ItineraryItem] = [],
+        settlements: [Settlement] = [],
+        departures: [TripDeparture] = [],
+        invitedIDs: Set<UUID> = [],
         organiserIDs: Set<UUID>? = nil,
         cover: TripPhoto? = nil,
         previewBookingCount: Int? = nil,
@@ -431,6 +511,9 @@ struct Trip: Identifiable {
         self.tint = tint
         self.travellers = travellers
         self.items = items
+        self.settlements = settlements
+        self.departures = departures
+        self.invitedIDs = invitedIDs
         // Whoever created it organises until they add someone else.
         self.organiserIDs = organiserIDs ?? Set([travellers.first?.id].compactMap { $0 })
         self.cover = cover
@@ -520,6 +603,30 @@ struct Trip: Identifiable {
     /// summary, which is why the four of them could disagree about the same
     /// booking.
     func bearers(of item: ItineraryItem) -> [Traveller] {
+        let candidates = candidateBearers(of: item)
+
+        // Anybody whose confirmed departure took them off this booking drops
+        // out here, and *only* here — which is what keeps a mid-trip exit from
+        // leaking into arithmetic nobody thought to check. See `carries`.
+        //
+        // Invitees drop out for the simpler reason that they aren't on the
+        // trip yet. Both ends of the membership lifecycle meet in this one
+        // filter, which is why neither can leak into the ledger by accident.
+        let present = candidates.filter { !invitedIDs.contains($0.id) && carries(item, $0.id) }
+
+        // Never empty out a booking that had bearers. A cost divided across
+        // nobody is a cost that lands on nobody, and the payer is then owed
+        // money that no one owes — the balances stop summing to zero and
+        // `SettlementEngine` starts handing out transfers that can't clear.
+        // Falling back to the unfiltered set keeps the invariant that every
+        // booking's shares add up to its cost, which is worth more than
+        // honouring a departure on an edge case that shouldn't arise.
+        return present.isEmpty ? candidates : present
+    }
+
+    /// Who would bear this booking if nobody had ever left — the sharing rule
+    /// on its own, before membership dates are applied.
+    private func candidateBearers(of item: ItineraryItem) -> [Traveller] {
         switch item.split {
         case .equal:
             return travellers
@@ -649,7 +756,15 @@ struct Trip: Identifiable {
 
     /// Only organisers edit. Everyone else sees the plan read-only, which is
     /// the point of having one.
-    var youAreOrganiser: Bool { organiserIDs.contains(Traveller.you.id) }
+    ///
+    /// Leaving gives up the pen. Someone who has gone home keeps every read —
+    /// they can still see what they owe and still settle it — but a trip
+    /// they're no longer on isn't theirs to re-plan, and an organiser who left
+    /// on day three quietly retaining edit rights over the last four days is
+    /// not something anyone would expect.
+    var youAreOrganiser: Bool {
+        organiserIDs.contains(Traveller.you.id) && !hasLeft(Traveller.you.id)
+    }
 
     /// The code someone types to join. Derived from the trip's id so it's
     /// stable without needing to be stored, and shaped to be read aloud:
@@ -839,6 +954,15 @@ struct ActivityEvent: Identifiable {
     /// event shows it with the wrong glyph rather than dropping it.
     enum Kind: String, CaseIterable {
         case payment, recalculation, refund, joined, booking
+        /// Somebody has asked to leave a trip that's already running. Not a
+        /// fact yet — it changes what other people owe, so it waits on an
+        /// answer the way a settlement does.
+        /// Somebody has been asked to join a trip. Addressed to them alone —
+        /// nothing happens to anybody's ledger until they accept.
+        case invited
+        case departureRequested = "departure_requested"
+        /// The group agreed. Their side of the ledger is closed.
+        case left
         /// A booking's details moved under people who'd already planned round
         /// them — a time, a price, who's on it.
         case bookingChanged = "booking_changed"
@@ -849,6 +973,15 @@ struct ActivityEvent: Identifiable {
         case confirmed
         /// Someone said it didn't. The whole point of `confirmed` existing.
         case disputed
+        /// Somebody marked a direct settlement as paid, and it's waiting on
+        /// the person who received it to say so too.
+        case settlementRequested = "settlement_requested"
+        /// The recipient agreed — the balance it covered is actually gone now.
+        case settlementConfirmed = "settlement_confirmed"
+        /// The recipient said the money never arrived. Distinct from
+        /// `disputed`: that one questions a figure, this one questions
+        /// whether a transfer happened at all.
+        case settlementDeclined = "settlement_declined"
 
         var symbol: String {
             switch self {
@@ -856,11 +989,17 @@ struct ActivityEvent: Identifiable {
             case .recalculation: "arrow.triangle.2.circlepath"
             case .refund: "arrow.uturn.backward"
             case .joined: "person.badge.plus"
+            case .invited: "envelope.badge"
+            case .departureRequested: "person.badge.clock"
+            case .left: "person.badge.minus"
             case .booking: "checkmark"
             case .bookingChanged: "pencil"
             case .bookingRemoved: "trash"
             case .confirmed: "checkmark.seal.fill"
             case .disputed: "exclamationmark.bubble.fill"
+            case .settlementRequested: "arrow.left.arrow.right"
+            case .settlementConfirmed: "checkmark"
+            case .settlementDeclined: "xmark"
             }
         }
 
@@ -870,11 +1009,17 @@ struct ActivityEvent: Identifiable {
             case .recalculation: Palette.amber
             case .refund: AppTheme.positive
             case .joined: Palette.violet
+            case .invited: AppTheme.accent
+            case .departureRequested: Palette.amber
+            case .left: Palette.violet
             case .booking: Palette.blue
             case .bookingChanged: Palette.amber
             case .bookingRemoved: AppTheme.danger
             case .confirmed: AppTheme.positive
             case .disputed: AppTheme.danger
+            case .settlementRequested: AppTheme.accent
+            case .settlementConfirmed: AppTheme.positive
+            case .settlementDeclined: AppTheme.danger
             }
         }
 
@@ -882,9 +1027,11 @@ struct ActivityEvent: Identifiable {
         /// one — nobody wants four separate toggles for "a booking changed".
         var channel: NotificationChannel {
             switch self {
-            case .payment, .refund, .confirmed, .disputed: .payments
+            case .payment, .refund, .confirmed, .disputed,
+                 .settlementRequested, .settlementConfirmed, .settlementDeclined:
+                .payments
             case .booking, .bookingChanged, .bookingRemoved: .bookings
-            case .joined: .people
+            case .joined, .invited, .departureRequested, .left: .people
             case .recalculation: .balances
             }
         }
@@ -922,7 +1069,7 @@ enum NotificationChannel: String, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
-        case .payments: "Someone paid, confirmed or disputed"
+        case .payments: "Someone paid, or a payment was disputed"
         case .bookings: "Added, changed or removed"
         case .people: "Joined or left a trip"
         case .balances: "Shares recalculated"
@@ -955,22 +1102,6 @@ enum NotificationChannel: String, CaseIterable, Identifiable {
 }
 
 struct AppNotification: Identifiable {
-    /// What you said about a payment somebody else recorded.
-    ///
-    /// Held on the notification rather than on the booking on purpose. The
-    /// booking records what was paid; this records whether the people it
-    /// landed on *agree*, and those are different claims — one person
-    /// disputing a payment shouldn't rewrite the ledger out from under
-    /// everyone else, it should start a conversation.
-    enum Response: String {
-        case confirmed, disputed
-
-        var label: String { self == .confirmed ? "Confirmed" : "Disputed" }
-        var symbol: String { self == .confirmed ? "checkmark.seal.fill" : "exclamationmark.bubble.fill" }
-        var tint: Color { self == .confirmed ? AppTheme.positive : AppTheme.danger }
-        var event: ActivityEvent.Kind { self == .confirmed ? .confirmed : .disputed }
-    }
-
     let id: UUID
     let kind: ActivityEvent.Kind
     let title: String
@@ -981,10 +1112,11 @@ struct AppNotification: Identifiable {
     var isUnread: Bool
     /// Which trip it belongs to, so tapping one can open it.
     var tripID: UUID?
-    /// Your answer, when this is a payment that wanted one. Stored on device —
-    /// see `NotificationStore.responses` — because the `notifications` table
-    /// has no column for it and the answer is worth keeping either way.
-    var response: Response?
+    /// Which booking it's about, when it's about an itinerary item or payment.
+    var itemID: UUID?
+    /// Which settlement it's about, when it's one of the `settlement*` kinds —
+    /// the thing to open is the settlement itself, not just the trip it's on.
+    var settlementID: UUID?
 
     init(
         id: UUID = UUID(),
@@ -994,7 +1126,8 @@ struct AppNotification: Identifiable {
         date: Date = Date(),
         isUnread: Bool = true,
         tripID: UUID? = nil,
-        response: Response? = nil
+        itemID: UUID? = nil,
+        settlementID: UUID? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -1003,14 +1136,9 @@ struct AppNotification: Identifiable {
         self.date = date
         self.isUnread = isUnread
         self.tripID = tripID
-        self.response = response
+        self.itemID = itemID
+        self.settlementID = settlementID
     }
-
-    /// Whether this is asking you something. A payment somebody else recorded
-    /// is a claim on your share, so it gets two buttons rather than being
-    /// filed silently; everything else is news, and news doesn't need an
-    /// answer.
-    var needsResponse: Bool { kind == .payment && response == nil && tripID != nil }
 
     var time: String {
         let seconds = Date().timeIntervalSince(date)

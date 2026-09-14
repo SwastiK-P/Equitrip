@@ -22,6 +22,13 @@ struct ItineraryItemDetailView: View {
     /// person who organised the trip.
     var onRecordPayment: ((UUID?, PaymentMethod?, URL?) -> Void)?
     var onEdit: (() -> Void)?
+    /// Reports a payment as wrong — passes an optional reason string. The
+    /// only way a payment's status ever changes once it's recorded: it's
+    /// taken as confirmed the moment someone says they paid, and this is
+    /// how anyone who disagrees says otherwise.
+    var onDisputePayment: ((String?) -> Void)?
+    /// Mark the active dispute as resolved.
+    var onResolveDispute: (() -> Void)?
 
     @State private var showParticipants = false
     @State private var showPayment = false
@@ -32,9 +39,18 @@ struct ItineraryItemDetailView: View {
     @State private var showsReceipt = false
     /// The receipt being viewed full screen.
     @State private var previewing: ReceiptRef?
+    /// Presenting the "Enter dispute reason" sheet.
+    @State private var showDisputeEntry = false
+    /// The dispute reason typed by the user.
+    @State private var disputeReasonDraft = ""
 
     private var participants: [Traveller] { trip.participants(of: item) }
     private var shares: [(traveller: Traveller, amount: Double)] { trip.shares(of: item) }
+
+    /// Same test as `TimelineRow`'s dashed card border — logged after the
+    /// trip had already started, rather than planned ahead with the rest of
+    /// the itinerary.
+    private var isUnplanned: Bool { item.createdAt >= trip.startDate }
 
     var body: some View {
         ScrollView {
@@ -65,6 +81,13 @@ struct ItineraryItemDetailView: View {
                     // a sentence first.
                     paidBy
                     costBreakdown
+                }
+
+                // Dispute card sits after cost info, before participants.
+                // It belongs in the money section because it's about the
+                // payment record, not the booking plan.
+                if item.isDisputed {
+                    disputeCard
                 }
 
                 who
@@ -105,6 +128,19 @@ struct ItineraryItemDetailView: View {
                 receiptURL: $receiptDraft
             )
         }
+        .sheet(isPresented: $showDisputeEntry) {
+            DisputeReasonSheet(reason: $disputeReasonDraft) {
+                onDisputePayment?(disputeReasonDraft.trimmingCharacters(in: .whitespaces).isEmpty ? nil : disputeReasonDraft)
+                showDisputeEntry = false
+                GlassToastCenter.shared.show(.init(
+                    symbol: "flag.fill",
+                    tint: AppTheme.danger,
+                    title: "Payment reported",
+                    subtitle: "\"\(item.title)\" is flagged until it's sorted out.",
+                    duration: .seconds(3.5)
+                ))
+            }
+        }
     }
 
     /// The sheet edits copies, and they land on the booking when it closes —
@@ -116,6 +152,13 @@ struct ItineraryItemDetailView: View {
             || receiptDraft != item.receiptURL
         else { return }
         onRecordPayment?(payerDraft, methodDraft, receiptDraft)
+        GlassToastCenter.shared.show(.init(
+            symbol: "creditcard.fill",
+            tint: AppTheme.accent,
+            title: "Payment recorded",
+            subtitle: "\"\(item.title)\" now shows who paid.",
+            duration: .seconds(3)
+        ))
     }
 
     // MARK: - Chrome
@@ -129,7 +172,29 @@ struct ItineraryItemDetailView: View {
                 .padding(.vertical, 5)
                 .background(item.kind.tint.opacity(0.14), in: .capsule)
 
+            if isUnplanned {
+                Text("Unplanned")
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .overlay {
+                        Capsule().strokeBorder(AppTheme.accent.opacity(0.5), style: StrokeStyle(lineWidth: 1.3, dash: [4, 3]))
+                    }
+            }
+
             Spacer(minLength: 8)
+
+            // Reporting only makes sense once there's a payment to question,
+            // and only once — a payment already under dispute is reported,
+            // not reportable again.
+            if onDisputePayment != nil, item.paidByID != nil, !item.isDisputed {
+                smallActionButton(title: "Report", symbol: "flag", tint: AppTheme.danger) {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    disputeReasonDraft = ""
+                    showDisputeEntry = true
+                }
+            }
 
             CircleGlyphButton(symbol: "xmark", size: 34) { dismiss() }
                 .accessibilityLabel("Close")
@@ -344,7 +409,7 @@ struct ItineraryItemDetailView: View {
         let isYou = traveller.id == Traveller.you.id
 
         return HStack(spacing: 12) {
-            MemojiAvatar(traveller: traveller, size: 30)
+            TravellerAvatar(traveller: traveller, size: 30)
 
             Text(isYou ? "\(traveller.name) (you)" : traveller.name)
                 .font(.system(size: 14.5, weight: isYou ? .semibold : .regular))
@@ -449,7 +514,7 @@ struct ItineraryItemDetailView: View {
         } label: {
             HStack(spacing: 12) {
                 if let payer = item.paidByID.flatMap(trip.traveller) {
-                    MemojiAvatar(traveller: payer, size: 34)
+                    TravellerAvatar(traveller: payer, size: 34)
 
                     VStack(alignment: .leading, spacing: 1) {
                         Text(payer.id == Traveller.you.id ? "You paid" : "\(payer.name) paid")
@@ -548,23 +613,42 @@ struct ItineraryItemDetailView: View {
             }
 
             if onRecordPayment != nil {
-                Button(action: openPayment) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(item.receiptURL == nil ? "Edit payment" : "Change payment or receipt")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                }
-                .buttonStyle(.glass)
-                .tint(AppTheme.accent)
+                smallActionButton(
+                    title: item.receiptURL == nil ? "Edit payment" : "Change payment",
+                    symbol: "pencil",
+                    tint: AppTheme.accent,
+                    action: openPayment
+                )
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 13)
         .padding(.bottom, 14)
+    }
+
+    /// A small, content-sized action rather than a full-width `.glass`
+    /// button — voting and editing a recorded payment are quick, low-stakes
+    /// taps here, not "are you sure" moments, and stretching them the width
+    /// of the card overstated that.
+    private func smallActionButton(
+        title: String,
+        symbol: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(tint.opacity(0.13), in: .rect(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(PressableButtonStyle())
     }
 
     private func receiptPlaceholder(symbol: String, text: String) -> some View {
@@ -603,6 +687,86 @@ struct ItineraryItemDetailView: View {
         return item.receiptURL == nil ? method.label : "\(method.label) · receipt attached"
     }
 
+    private var disputeCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.bubble.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(AppTheme.danger)
+                    .frame(width: 42, height: 42)
+                    .background(AppTheme.danger.opacity(0.13), in: .circle)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Payment Disputed")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(AppTheme.ink)
+
+                    Text(disputeLine)
+                        .font(.system(size: 13))
+                        .foregroundStyle(AppTheme.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if let reason = disputeReason {
+                Text(reason)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(AppTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(AppTheme.canvasBottom.opacity(0.45), in: .rect(cornerRadius: 14, style: .continuous))
+            }
+
+            if let onResolveDispute {
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onResolveDispute()
+                    GlassToastCenter.shared.show(.init(
+                        symbol: "checkmark.seal.fill",
+                        tint: AppTheme.positive,
+                        title: "Dispute resolved",
+                        subtitle: "\"\(item.title)\" is settled.",
+                        duration: .seconds(3)
+                    ))
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Dispute resolved")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(AppTheme.positive)
+            }
+        }
+        .padding(16)
+        .background(AppTheme.danger.opacity(0.07), in: .rect(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(AppTheme.danger.opacity(0.22))
+        }
+    }
+
+    private var disputeLine: String {
+        let actor = item.disputedByID.flatMap(trip.traveller)
+        let name = actor.map { $0.id == Traveller.you.id ? "You" : $0.name } ?? "Someone"
+        guard let date = item.disputedAt else { return "\(name) disputed this payment." }
+        return "\(name) disputed this payment \(DateFormatter.cached("d MMM, h:mm a").string(from: date))."
+    }
+
+    private var disputeReason: String? {
+        guard let reason = item.disputeReason?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !reason.isEmpty
+        else { return nil }
+        return reason
+    }
+
     /// A row rather than a chip wall — the same collapse the booking editor
     /// got, for the same reason: eight faces wrapped onto four rows here and
     /// pushed the flight card and the provenance line off the bottom.
@@ -623,7 +787,7 @@ struct ItineraryItemDetailView: View {
     private var provenance: some View {
         HStack(spacing: 10) {
             if let creator = item.createdByID.flatMap(trip.traveller) {
-                MemojiAvatar(traveller: creator, size: 26)
+                TravellerAvatar(traveller: creator, size: 26)
 
                 Text("Added by \(creator.id == Traveller.you.id ? "you" : creator.name)")
                     .font(.system(size: 12.5))
@@ -655,5 +819,86 @@ struct ItineraryItemDetailView: View {
             .tracking(0.9)
             .foregroundStyle(AppTheme.inkTertiary)
             .padding(.leading, 2)
+    }
+}
+
+private struct DisputeReasonSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @Binding var reason: String
+    var onSubmit: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Reason")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.9)
+                        .foregroundStyle(AppTheme.inkTertiary)
+
+                    TextField("Amount doesn't match receipt", text: $reason, axis: .vertical)
+                        .font(.system(size: 15))
+                        .foregroundStyle(AppTheme.ink)
+                        .lineLimit(3...5)
+                        .padding(14)
+                        .background(AppTheme.card.opacity(0.76), in: .rect(cornerRadius: 16, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(AppTheme.cardStroke.opacity(0.08))
+                        }
+                }
+
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onSubmit()
+                    dismiss()
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "exclamationmark.bubble.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Dispute payment")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.glassProminent)
+                .tint(AppTheme.danger)
+
+                Color.clear.frame(height: 10)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+
+            Spacer(minLength: 0)
+        }
+        .presentationDragIndicator(.hidden)
+        .presentationDetents([.medium])
+        .presentationBackground { CanvasBackground() }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Dispute payment")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.ink)
+
+                Text("Add a short note for the trip.")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(AppTheme.inkTertiary)
+            }
+
+            Spacer(minLength: 8)
+
+            CircleGlyphButton(symbol: "xmark", size: 34) { dismiss() }
+                .accessibilityLabel("Close")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 14)
     }
 }

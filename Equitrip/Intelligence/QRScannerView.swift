@@ -117,12 +117,12 @@ enum Torch {
 /// A raw `DataScannerViewController` fills the screen with a live feed and no
 /// indication of where to point it, which is why the old version needed a
 /// caption explaining what to do. This puts an aperture on it: everything
-/// outside the square is dimmed, the corners are bracketed, and a soft band
-/// sweeps the opening so the screen reads as actively looking rather than
-/// merely being a camera that happens to be on.
+/// outside the square is dimmed and the corners are bracketed, breathing
+/// slightly so the screen reads as actively looking rather than merely being
+/// a camera that happens to be on.
 ///
 /// The whole thing is one state machine — `hunting`, `found`, `working` — so
-/// the moment a code lands the sweep stops, the brackets snap in, and the
+/// the moment a code lands the brackets snap in, and the
 /// frame goes green under a checkmark. Nothing about that is decoration: the
 /// gap between "the camera saw it" and "the trip loaded" is a network call,
 /// and without a state for it people scan the same code three more times.
@@ -145,7 +145,6 @@ struct QRScanScreen: View {
     var isResolving: Bool = false
 
     @State private var phase: Phase = .hunting
-    @State private var sweep = false
     @State private var breathe = false
     @State private var torchOn = false
     /// The code that was just read, and where on screen the camera found it.
@@ -228,9 +227,6 @@ struct QRScanScreen: View {
             // beat of the burst.
             BurstHaptics.prepare()
 
-            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                sweep = true
-            }
             withAnimation(.easeInOut(duration: 1.9).repeatForever(autoreverses: true)) {
                 breathe = true
             }
@@ -297,10 +293,6 @@ struct QRScanScreen: View {
 
             brackets
 
-            if !isLocked, phase != .rejected {
-                sweepBand
-            }
-
             if isLocked {
                 foundMark
             }
@@ -334,34 +326,6 @@ struct QRScanScreen: View {
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.7), value: isLocked)
         .animation(.easeInOut(duration: 1.9).repeatForever(autoreverses: true), value: breathe)
-    }
-
-    /// The sweep. A band rather than a hairline, because a one-pixel line at
-    /// this speed strobes; a soft gradient with a bright core reads as a beam
-    /// passing over the opening.
-    private var sweepBand: some View {
-        GeometryReader { proxy in
-            let travel = proxy.size.height / 2 - 22
-
-            LinearGradient(
-                colors: [
-                    .clear,
-                    AppTheme.accent.opacity(0.0),
-                    AppTheme.accent.opacity(0.45),
-                    .white.opacity(0.95),
-                    AppTheme.accent.opacity(0.45),
-                    .clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 76)
-            .blur(radius: 1.5)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .offset(y: sweep ? travel : -travel)
-        }
-        .clipShape(.rect(cornerRadius: 34, style: .continuous))
-        .transition(.opacity)
     }
 
     private var foundMark: some View {

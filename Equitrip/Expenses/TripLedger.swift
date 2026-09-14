@@ -19,12 +19,19 @@ import SwiftUI
 struct TripLedger: View {
     let trip: Trip
     var onOpen: (ItineraryItem) -> Void
+    /// Opens a proposal that's waiting on an answer.
+    var onReviewDeparture: ((TripDeparture) -> Void)?
+    /// Opens a closed exit's frozen statement.
+    var onOpenStatement: ((TripDeparture) -> Void)?
 
     @State private var filter: Filter = .all
+    @State private var searchText = ""
+    @State private var showAllExpenses = false
+    @State private var showAudit = false
     @State private var appeared = false
 
     enum Filter: Hashable, CaseIterable {
-        case all, youPaid, yours, unpaid
+        case all, youPaid, yours, unpaid, disputed
 
         var label: String {
             switch self {
@@ -32,9 +39,16 @@ struct TripLedger: View {
             case .youPaid: "You paid"
             case .yours: "Costs you"
             case .unpaid: "No payer"
+            case .disputed: "Disputed"
             }
         }
     }
+
+    /// How many rows the ledger shows inline before handing off to the full
+    /// list. Five is a glance's worth — enough to answer "what's recent"
+    /// without the card outgrowing the rest of the trip screen, which is what
+    /// happened once a trip passed a dozen priced bookings.
+    private static let inlineCap = 5
 
     private var currency: String { trip.currencyCode }
 
@@ -43,12 +57,68 @@ struct TripLedger: View {
             money
                 .staggered(0, appeared)
 
+            // Between the totals and the expense list on purpose. Somebody
+            // leaving is a fact about the money — it's why a share moved —
+            // so it belongs with the figures rather than filed away under
+            // people, and it sits above the expenses because it changes how
+            // they're read.
+            if !trip.departures.isEmpty {
+                people
+                    .staggered(1, appeared)
+            }
+
             expenses
-                .staggered(1, appeared)
+                .staggered(2, appeared)
+
+            // Under the expenses, deliberately last. It answers the question
+            // the figures provoke rather than one of the figures themselves:
+            // you read what something costs, you disagree with it, and only
+            // then do you want to know who made it that.
+            AuditTrailButton(trip: trip) { showAudit = true }
+                .staggered(3, appeared)
         }
         .padding(.horizontal, 20)
         .padding(.top, 14)
         .onAppear { withAnimation { appeared = true } }
+        .sheet(isPresented: $showAllExpenses) {
+            ExpensesListView(trip: trip, filter: filter, searchText: searchText, onOpen: onOpen)
+        }
+        .sheet(isPresented: $showAudit) {
+            AuditTrailSheet(trip: trip)
+        }
+    }
+
+    /// Shared between the inline card and the full list, so "You paid, 3" on
+    /// one means the same thing as "You paid, 3" on the other — both are the
+    /// same filter applied to the same search, just with a different cap.
+    fileprivate static func apply(_ filter: Filter, search: String, to priced: [ItineraryItem], trip: Trip) -> [ItineraryItem] {
+        let filtered: [ItineraryItem]
+        switch filter {
+        case .all:
+            filtered = priced
+        case .youPaid:
+            filtered = priced.filter { $0.paidByID == Traveller.you.id }
+        case .yours:
+            filtered = priced.filter { trip.share(of: $0, for: Traveller.you.id) > 0 }
+        case .unpaid:
+            filtered = priced.filter { $0.paidByID == nil }
+        case .disputed:
+            filtered = priced.filter { $0.isDisputed }
+        }
+
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let searched: [ItineraryItem]
+        if query.isEmpty {
+            searched = filtered
+        } else {
+            searched = filtered.filter { item in
+                item.title.localizedCaseInsensitiveContains(query)
+                    || item.vendor.localizedCaseInsensitiveContains(query)
+                    || item.kind.label.localizedCaseInsensitiveContains(query)
+            }
+        }
+
+        return searched.sorted(by: Trip.chronological)
     }
 
     // MARK: - Figures
@@ -165,29 +235,69 @@ struct TripLedger: View {
         .background(AppTheme.canvasBottom.opacity(0.45), in: .rect(cornerRadius: 16, style: .continuous))
     }
 
+    // MARK: - Departures
+
+    /// Who has left, and who has asked to.
+    ///
+    /// The whole of the departure UI's depth lives here, collapsed to one row
+    /// per person. Everything on the timeline is a marker — a greyed face, a
+    /// line on the day it happened — and this is where the arithmetic behind
+    /// those markers is available to anybody who wants to interrogate it,
+    /// without putting it in front of the people who don't.
+    private var people: some View {
+        let pending = trip.pendingDepartures
+        let closed = trip.confirmedDepartures
+
+        return VStack(alignment: .leading, spacing: 11) {
+            SectionHeader(
+                title: "Who's on this",
+                caption: "\(trip.activeTravellers.count) of \(trip.travellers.count)"
+            )
+
+            VStack(spacing: 0) {
+                ForEach(Array(pending.enumerated()), id: \.element.id) { index, departure in
+                    DepartureLedgerRow(
+                        trip: trip,
+                        departure: departure,
+                        action: onReviewDeparture.map { handler in { handler(departure) } }
+                    )
+
+                    if index < pending.count - 1 || !closed.isEmpty { Hairline(inset: 16) }
+                }
+
+                ForEach(Array(closed.enumerated()), id: \.element.id) { index, departure in
+                    DepartureLedgerRow(
+                        trip: trip,
+                        departure: departure,
+                        action: onOpenStatement.map { handler in { handler(departure) } }
+                    )
+
+                    if index < closed.count - 1 { Hairline(inset: 16) }
+                }
+            }
+            .cardSurface(corner: 24)
+        }
+    }
+
     // MARK: - Expenses
 
     private var visible: [ItineraryItem] {
-        switch filter {
-        case .all:
-            return priced.sorted(by: Trip.chronological)
-        case .youPaid:
-            return priced.filter { $0.paidByID == Traveller.you.id }.sorted(by: Trip.chronological)
-        case .yours:
-            return priced
-                .filter { trip.share(of: $0, for: Traveller.you.id) > 0 }
-                .sorted(by: Trip.chronological)
-        case .unpaid:
-            return priced.filter { $0.paidByID == nil }.sorted(by: Trip.chronological)
-        }
+        Self.apply(filter, search: searchText, to: priced, trip: trip)
     }
+
+    private var inlineVisible: [ItineraryItem] { Array(visible.prefix(Self.inlineCap)) }
 
     private var expenses: some View {
         VStack(alignment: .leading, spacing: 11) {
             SectionHeader(
                 title: "Expenses",
-                caption: Money.format(visible.reduce(0) { $0 + $1.cost }.rounded(), code: currency)
-            )
+                caption: Money.format(visible.reduce(0) { $0 + $1.cost }.rounded(), code: currency),
+                actionTitle: visible.count > Self.inlineCap ? "View all" : nil
+            ) {
+                showAllExpenses = true
+            }
+
+            LedgerSearchField(text: $searchText, placeholder: "Search expenses")
 
             filters
 
@@ -200,34 +310,58 @@ struct TripLedger: View {
                     .cardSurface(corner: 22)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(visible.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(inlineVisible.enumerated()), id: \.element.id) { index, item in
                         Button { onOpen(item) } label: {
                             LedgerRow(item: item, trip: trip)
                         }
                         .buttonStyle(PressableButtonStyle())
 
-                        if index < visible.count - 1 { Hairline(inset: 16) }
+                        if index < inlineVisible.count - 1 { Hairline(inset: 16) }
                     }
                 }
                 .cardSurface(corner: 24)
+
+                if visible.count > Self.inlineCap {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showAllExpenses = true
+                    } label: {
+                        Text("View all \(visible.count) expenses")
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                }
             }
         }
     }
 
     private var emptyLine: String {
+        guard searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "No expenses match “\(searchText.trimmingCharacters(in: .whitespacesAndNewlines))”."
+        }
         switch filter {
-        case .all: "Put a price on a booking and it lands here."
-        case .youPaid: "You haven't paid for anything on this trip."
-        case .yours: "None of these bookings land on you."
-        case .unpaid: "Every expense has somebody's name against it."
+        case .all: return "Put a price on a booking and it lands here."
+        case .youPaid: return "You haven't paid for anything on this trip."
+        case .yours: return "None of these bookings land on you."
+        case .unpaid: return "Every expense has somebody's name against it."
+        case .disputed: return "No disputed payments — everything checks out."
         }
     }
 
     private var filters: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                ForEach(Filter.allCases, id: \.self) { option in
-                    chip(option, count: count(for: option))
+                ForEach(Self.filterOptions(for: priced), id: \.self) { option in
+                    LedgerFilterChip(
+                        label: option.label,
+                        count: Self.apply(option, search: searchText, to: priced, trip: trip).count,
+                        isOn: filter == option
+                    ) {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.85)) { filter = option }
+                    }
                 }
             }
             .padding(.horizontal, 2)
@@ -236,40 +370,281 @@ struct TripLedger: View {
         .scrollIndicators(.hidden)
     }
 
-    private func chip(_ option: Filter, count: Int) -> some View {
-        let on = filter == option
+    /// The filter chips to show. The disputed chip is hidden when there are
+    /// no disputed payments — showing a zero-count disputed chip on a clean
+    /// ledger would just make it look like something is wrong.
+    fileprivate static func filterOptions(for priced: [ItineraryItem]) -> [Filter] {
+        if priced.contains(where: { $0.isDisputed }) {
+            return Filter.allCases
+        }
+        return Filter.allCases.filter { $0 != .disputed }
+    }
+}
 
-        return Button {
+// MARK: - Departure row
+
+/// One person's exit, collapsed to a line.
+///
+/// A pending one leads with what it's waiting for, because that's an action
+/// somebody owes; a closed one leads with the dates and the final figure,
+/// because that's a fact somebody might want to check.
+struct DepartureLedgerRow: View {
+    let trip: Trip
+    let departure: TripDeparture
+    var action: (() -> Void)?
+
+    private var traveller: Traveller? { trip.traveller(departure.travellerID) }
+
+    var body: some View {
+        Button { action?() } label: {
+            HStack(spacing: 12) {
+                if let traveller {
+                    TravellerAvatar(traveller: traveller, size: 36, isDimmed: departure.isConfirmed)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(subtitleName)
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(AppTheme.ink)
+                        .lineLimit(1)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: departure.isPending ? "clock.fill" : "arrow.right.to.line")
+                            .font(.system(size: 8, weight: .bold))
+                        Text(detail)
+                            .font(.system(size: 11.5, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(departure.isPending ? Palette.amber : AppTheme.inkTertiary)
+                }
+
+                Spacer(minLength: 6)
+
+                if departure.isConfirmed, abs(departure.agreedBalance) > SettlementEngine.epsilon {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(Money.format(abs(departure.agreedBalance).rounded(), code: trip.currencyCode))
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(departure.agreedBalance > 0 ? AppTheme.moneyIn : AppTheme.moneyOut)
+                        Text(departure.agreedBalance > 0 ? "owed to them" : "they owe")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(AppTheme.inkTertiary)
+                    }
+                    .fixedSize()
+                }
+
+                if action != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(AppTheme.inkTertiary)
+                }
+            }
+            .padding(14)
+            .contentShape(.rect)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .disabled(action == nil)
+    }
+
+    private var subtitleName: String {
+        guard let traveller else { return "Someone" }
+        return traveller.id == Traveller.you.id ? "You" : traveller.name
+    }
+
+    private var detail: String {
+        if departure.isPending {
+            return departure.isYours ? "Waiting to be confirmed" : "Asked to leave · needs your answer"
+        }
+        return trip.presenceLabel(departure.travellerID) ?? "Left the trip"
+    }
+}
+
+// MARK: - All expenses
+
+/// The full ledger, handed off to from the trip card's five-row preview.
+///
+/// Same filters, same search, same rows — it's the rest of the list rather
+/// than a different way of looking at it, so nothing here has to be relearnt.
+private struct ExpensesListView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let trip: Trip
+    @State var filter: TripLedger.Filter
+    @State var searchText: String
+    var onOpen: (ItineraryItem) -> Void
+
+    private var priced: [ItineraryItem] { trip.items.filter { $0.cost > 0 } }
+    private var visible: [ItineraryItem] { TripLedger.apply(filter, search: searchText, to: priced, trip: trip) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            LedgerSearchField(text: $searchText, placeholder: "Search expenses")
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+            filters
+                .padding(.bottom, 4)
+            list
+        }
+        .presentationDragIndicator(.hidden)
+        .presentationBackground { CanvasBackground() }
+    }
+
+    private var header: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Expenses")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.ink)
+                Text(trip.title)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(AppTheme.inkTertiary)
+            }
+
+            Spacer(minLength: 8)
+
+            CircleGlyphButton(symbol: "xmark", size: 34) { dismiss() }
+                .accessibilityLabel("Close")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 14)
+    }
+
+    private var filters: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(TripLedger.filterOptions(for: priced), id: \.self) { option in
+                    LedgerFilterChip(
+                        label: option.label,
+                        count: TripLedger.apply(option, search: searchText, to: priced, trip: trip).count,
+                        isOn: filter == option
+                    ) {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.85)) { filter = option }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 2)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var list: some View {
+        ScrollView {
+            if visible.isEmpty {
+                Text(emptyLine)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(AppTheme.inkSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .cardSurface(corner: 22)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(visible.enumerated()), id: \.element.id) { index, item in
+                        Button {
+                            dismiss()
+                            onOpen(item)
+                        } label: {
+                            LedgerRow(item: item, trip: trip)
+                        }
+                        .buttonStyle(PressableButtonStyle())
+
+                        if index < visible.count - 1 { Hairline(inset: 16) }
+                    }
+                }
+                .cardSurface(corner: 24)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+            }
+
+            Color.clear.frame(height: 24)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var emptyLine: String {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.isEmpty else { return "No expenses match “\(query)”." }
+        switch filter {
+        case .all: return "Put a price on a booking and it lands here."
+        case .youPaid: return "You haven't paid for anything on this trip."
+        case .yours: return "None of these bookings land on you."
+        case .unpaid: return "Every expense has somebody's name against it."
+        case .disputed: return "No disputed payments — everything checks out."
+        }
+    }
+}
+
+// MARK: - Search field
+
+/// Shared with the audit trail sheet, which searches the same way over a
+/// different list — one field, one behaviour, one clear button.
+struct LedgerSearchField: View {
+    @Binding var text: String
+    var placeholder: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppTheme.inkTertiary)
+
+            TextField(placeholder, text: $text)
+                .font(.system(size: 14.5))
+                .foregroundStyle(AppTheme.ink)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(AppTheme.inkTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 13)
+        .frame(height: 42)
+        .panelSurface(corner: 14)
+    }
+}
+
+// MARK: - Filter chip
+
+struct LedgerFilterChip: View {
+    let label: String
+    let count: Int
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.85)) { filter = option }
+            action()
         } label: {
             HStack(spacing: 6) {
-                Text(option.label)
+                Text(label)
                     .font(.system(size: 13, weight: .semibold))
 
                 Text("\(count)")
                     .font(.system(size: 11.5, weight: .bold, design: .rounded))
                     .opacity(0.7)
             }
-            .foregroundStyle(on ? AppTheme.ctaLabel : AppTheme.inkSecondary)
+            .foregroundStyle(isOn ? AppTheme.ctaLabel : AppTheme.inkSecondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background {
-                Capsule().fill(on ? AnyShapeStyle(AppTheme.cta) : AnyShapeStyle(AppTheme.card.opacity(0.7)))
+                Capsule().fill(isOn ? AnyShapeStyle(AppTheme.cta) : AnyShapeStyle(AppTheme.card.opacity(0.7)))
             }
-            .overlay { Capsule().strokeBorder(AppTheme.cardStroke.opacity(on ? 0 : 0.07)) }
+            .overlay { Capsule().strokeBorder(AppTheme.cardStroke.opacity(isOn ? 0 : 0.07)) }
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
-    }
-
-    private func count(for option: Filter) -> Int {
-        switch option {
-        case .all: priced.count
-        case .youPaid: priced.filter { $0.paidByID == Traveller.you.id }.count
-        case .yours: priced.filter { trip.share(of: $0, for: Traveller.you.id) > 0 }.count
-        case .unpaid: priced.filter { $0.paidByID == nil }.count
-        }
     }
 }
 
@@ -308,13 +683,23 @@ private struct LedgerRow: View {
                     .font(.system(size: 15.5, weight: .bold, design: .rounded))
                     .foregroundStyle(AppTheme.ink)
 
-                Text(
-                    yourShare > 0.01
-                        ? "yours \(Money.format(yourShare.rounded(), code: trip.currencyCode))"
-                        : "not yours"
-                )
-                .font(.system(size: 11))
-                .foregroundStyle(AppTheme.inkTertiary)
+                if item.isDisputed {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.bubble.fill")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("Disputed")
+                            .font(.system(size: 10.5, weight: .bold))
+                    }
+                    .foregroundStyle(AppTheme.danger)
+                } else {
+                    Text(
+                        yourShare > 0.01
+                            ? "yours \(Money.format(yourShare.rounded(), code: trip.currencyCode))"
+                            : "not yours"
+                    )
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppTheme.inkTertiary)
+                }
             }
             .lineLimit(1)
             .fixedSize()
@@ -336,9 +721,18 @@ private struct LedgerRow: View {
     /// state on this screen that's actually a problem.
     @ViewBuilder
     private var payerLine: some View {
-        if let payer {
+        if item.isDisputed {
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.bubble.fill")
+                    .font(.system(size: 9, weight: .bold))
+                Text("Payment disputed")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(AppTheme.danger)
+            .padding(.top, 2)
+        } else if let payer {
             HStack(spacing: 5) {
-                MemojiAvatar(traveller: payer, size: 16)
+                TravellerAvatar(traveller: payer, size: 16)
 
                 Text(payer.id == Traveller.you.id ? "You paid" : "\(payer.name) paid")
                     .font(.system(size: 11, weight: .medium))

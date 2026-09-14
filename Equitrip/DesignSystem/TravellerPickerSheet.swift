@@ -18,6 +18,26 @@ struct TravellerPickerSheet: View {
     var organiserIDs: Binding<Set<UUID>>?
     /// Everyone can see who's coming; only the organiser can change it.
     var isEditable: Bool = true
+    /// The trip these people are on, when there is one.
+    ///
+    /// Optional because this sheet is also used by the new-trip flow, where
+    /// there is no trip yet and nobody can have left one. When it's present,
+    /// rows show who has gone and when, and taking somebody off routes through
+    /// the departure flow instead of deleting them from the array.
+    var trip: Trip?
+    /// Opens the leave flow for one person. Nil means the caller doesn't
+    /// support departures — the plain remove is used instead.
+    var onLeave: ((Traveller) -> Void)?
+    /// Asks somebody to join, rather than putting them on the trip.
+    ///
+    /// Nil in the new-trip flow, where there is no trip to be invited to yet
+    /// and the people being picked are the ones creating it — those go
+    /// straight onto the roster. On a trip that exists, this is the only way
+    /// somebody gets added, because adding a person to a live ledger without
+    /// asking them is how people end up owing money they never agreed to.
+    var onInvite: ((Traveller) -> Void)?
+    /// Withdraws an invitation nobody has answered.
+    var onCancelInvite: ((Traveller) -> Void)?
 
     @State private var newEmail = ""
     @State private var isResolving = false
@@ -56,7 +76,7 @@ struct TravellerPickerSheet: View {
                 Text("Travellers")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(AppTheme.ink)
-                Text("\(travellers.count) on this trip")
+                Text(rosterCaption)
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(AppTheme.inkTertiary)
             }
@@ -144,14 +164,17 @@ struct TravellerPickerSheet: View {
         let isOrganiser = organiserIDs?.wrappedValue.contains(traveller.id) ?? false
         // Someone has to be able to edit; the last organiser can't step down.
         let isLastOrganiser = isOrganiser && (organiserIDs?.wrappedValue.count ?? 0) <= 1
+        let hasLeft = trip?.hasLeft(traveller.id) ?? false
+        let leaving = trip?.pendingDeparture(for: traveller.id) != nil
+        let isInvited = trip?.isInvited(traveller.id) ?? false
 
         return HStack(spacing: 12) {
-            MemojiAvatar(traveller: traveller, size: 36)
+            TravellerAvatar(traveller: traveller, size: 36, isDimmed: hasLeft || isInvited)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(isYou ? "\(traveller.name) (you)" : traveller.name)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(AppTheme.ink)
+                    .foregroundStyle(hasLeft || isInvited ? AppTheme.inkSecondary : AppTheme.ink)
 
                 if let email = traveller.email, !traveller.isRegistered {
                     Text("Invited · \(email)")
@@ -165,7 +188,35 @@ struct TravellerPickerSheet: View {
                         .lineLimit(1)
                 }
 
-                if isOrganiser {
+                // The one line that answers "were they here for this?".
+                // It replaces the organiser badge rather than stacking under
+                // it: somebody who has gone home is no longer organising
+                // anything, and two badges on one row is a row nobody reads.
+                if isInvited {
+                    HStack(spacing: 4) {
+                        Image(systemName: "envelope.fill")
+                            .font(.system(size: 8, weight: .bold))
+                        Text("Invited · not on the trip yet")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(AppTheme.accent)
+                } else if hasLeft, let presence = trip?.presenceLabel(traveller.id) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.right.to.line")
+                            .font(.system(size: 8, weight: .bold))
+                        Text(presence)
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(AppTheme.inkTertiary)
+                } else if leaving {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.fill")
+                            .font(.system(size: 8, weight: .bold))
+                        Text("Asked to leave")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(Palette.amber)
+                } else if isOrganiser {
                     HStack(spacing: 4) {
                         Image(systemName: "star.fill")
                             .font(.system(size: 8, weight: .bold))
@@ -196,9 +247,34 @@ struct TravellerPickerSheet: View {
                     }
                 }
 
-                // Removing the organiser would leave nobody able to edit, and
-                // removing yourself leaves a trip you can't settle.
-                if isEditable, !isYou, !isOrganiser {
+                // Two very different acts wearing one label until now.
+                //
+                // Before a trip starts, nobody has paid for anything and there
+                // is no history to preserve, so taking a name off the list
+                // really is just that. Once it's running, the same tap would
+                // silently re-divide every booking they were on — including
+                // ones already settled — so it routes through the departure
+                // flow instead, which shows the arithmetic and asks.
+                if let onLeave, !hasLeft, !leaving, !isInvited, isEditable || isYou {
+                    Button(role: isYou ? .destructive : nil) {
+                        onLeave(traveller)
+                    } label: {
+                        Label(
+                            isYou ? "Leave this trip" : "Take \(traveller.name) off the trip",
+                            systemImage: isYou ? "rectangle.portrait.and.arrow.right" : "person.badge.minus"
+                        )
+                    }
+                }
+
+                if let onCancelInvite, isInvited, isEditable {
+                    Button(role: .destructive) {
+                        onCancelInvite(traveller)
+                    } label: {
+                        Label("Withdraw invitation", systemImage: "envelope.badge.shield.half.filled")
+                    }
+                }
+
+                if onLeave == nil, onInvite == nil, isEditable, !isYou, !isOrganiser {
                     Button(role: .destructive) {
                         withAnimation { travellers.removeAll { $0.id == traveller.id } }
                     } label: {
@@ -209,12 +285,33 @@ struct TravellerPickerSheet: View {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 17))
                     .foregroundStyle(AppTheme.inkTertiary)
-                    .opacity(isEditable ? 1 : 0)
+                    .opacity(canAct(isYou: isYou, hasLeft: hasLeft) ? 1 : 0)
             }
-            .disabled(!isEditable)
+            .disabled(!canAct(isYou: isYou, hasLeft: hasLeft))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    /// Whether this row's menu has anything in it.
+    ///
+    /// Leaving is the one action that isn't the organiser's to gate: a
+    /// traveller who is not organising still gets to go home, and a sheet that
+    /// hid the control from them would leave them asking someone else to
+    /// remove them — which is the destructive path this whole flow replaces.
+    private func canAct(isYou: Bool, hasLeft: Bool) -> Bool {
+        if hasLeft { return false }
+        if isYou, onLeave != nil { return true }
+        return isEditable
+    }
+
+    /// "3 on this trip · 1 invited". The count people read as the group size
+    /// should be the group, not the group plus everyone who has been asked.
+    private var rosterCaption: String {
+        let pending = trip?.pendingInviteCount ?? 0
+        let joined = travellers.count - pending
+        let base = "\(joined) on this trip"
+        return pending == 0 ? base : "\(base) · \(pending) invited"
     }
 
     private func add() {
@@ -240,8 +337,12 @@ struct TravellerPickerSheet: View {
                     addFailure = "\(person.name) is already on this trip."
                     return
                 }
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
-                    travellers.append(person)
+                if let onInvite {
+                    onInvite(person)
+                } else {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+                        travellers.append(person)
+                    }
                 }
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 addFocused = true

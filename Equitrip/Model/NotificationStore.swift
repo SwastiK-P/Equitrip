@@ -23,17 +23,8 @@ final class NotificationStore {
     private(set) var items: [AppNotification]
     private(set) var isLoading = false
 
-    /// Payment answers, by notification id. Kept on device: the
-    /// `notifications` table has no column for them, and the answer is worth
-    /// keeping so the two buttons don't come back every time the sheet opens.
-    private var responses: [UUID: AppNotification.Response] = [:]
-
-    private static let responsesKey = "notifications.responses"
-
     init(items: [AppNotification] = []) {
         self.items = items.sorted { $0.date > $1.date }
-        loadResponses()
-        applyResponses()
     }
 
     /// What the app actually shows: everything whose channel is switched on.
@@ -50,10 +41,6 @@ final class NotificationStore {
     var unread: [AppNotification] { feed.filter(\.isUnread) }
     var read: [AppNotification] { feed.filter { !$0.isUnread } }
 
-    /// Payments still waiting on you. Surfaced separately because they're the
-    /// only notifications that are a question rather than a statement.
-    var awaitingResponse: [AppNotification] { feed.filter(\.needsResponse) }
-
     // MARK: - Loading
 
     func load() async {
@@ -66,7 +53,6 @@ final class NotificationStore {
         // already communicate by staying quiet.
         guard let remote = try? await SupabaseRepository.shared.loadNotifications() else { return }
         items = remote.sorted { $0.date > $1.date }
-        applyResponses()
     }
 
     // MARK: - Read state
@@ -83,74 +69,6 @@ final class NotificationStore {
             items[index].isUnread = false
         }
         Task { await SupabaseRepository.shared.markAllNotificationsRead() }
-    }
-
-    // MARK: - Responding
-
-    /// Answers a payment: yes that happened, or no it didn't.
-    ///
-    /// Both answers travel. A confirmation is what makes the ledger something
-    /// the group agreed to rather than something one person typed, and a
-    /// dispute is useless if only the person raising it can see it — the payer
-    /// is exactly who needs to know, and the rest of the group is who decides
-    /// whose account of it is right.
-    func respond(
-        _ response: AppNotification.Response,
-        to notification: AppNotification,
-        in trip: Trip?
-    ) {
-        guard let index = items.firstIndex(where: { $0.id == notification.id }) else { return }
-
-        items[index].response = response
-        items[index].isUnread = false
-        responses[notification.id] = response
-        saveResponses()
-
-        Task { await SupabaseRepository.shared.markNotificationRead(notification.id) }
-
-        guard let trip else { return }
-        let recipients = trip.travellers.map(\.id).filter { $0 != Traveller.you.id }
-        guard !recipients.isEmpty else { return }
-
-        let me = Traveller.you.name
-        post(
-            AppNotification(
-                kind: response.event,
-                title: response == .confirmed
-                    ? "\(me) confirmed a payment on \(trip.title)"
-                    : "\(me) disputed a payment on \(trip.title)",
-                body: response == .confirmed
-                    ? notification.title
-                    : "\(notification.title) — worth checking before anyone settles up.",
-                tripID: trip.id
-            ),
-            to: recipients
-        )
-    }
-
-    private func loadResponses() {
-        guard let raw = UserDefaults.standard.dictionary(forKey: Self.responsesKey) as? [String: String] else { return }
-        responses = raw.reduce(into: [:]) { store, entry in
-            guard let id = UUID(uuidString: entry.key),
-                  let response = AppNotification.Response(rawValue: entry.value) else { return }
-            store[id] = response
-        }
-    }
-
-    private func saveResponses() {
-        let raw = responses.reduce(into: [String: String]()) { store, entry in
-            store[entry.key.uuidString] = entry.value.rawValue
-        }
-        UserDefaults.standard.set(raw, forKey: Self.responsesKey)
-    }
-
-    /// Re-attaches saved answers after a load, which brings back plain rows
-    /// from the server with no idea what was said about them.
-    private func applyResponses() {
-        guard !responses.isEmpty else { return }
-        for index in items.indices {
-            items[index].response = responses[items[index].id]
-        }
     }
 
     // MARK: - Posting
@@ -187,6 +105,79 @@ final class NotificationStore {
                 body: trip.items.isEmpty
                     ? "They're on the trip. Nothing is shared with them yet."
                     : "Shares on \(trip.items.count.pluralised("booking")) will recalculate once they're added to them.",
+                tripID: trip.id
+            ),
+            to: recipients
+        )
+    }
+
+    /// Somebody has been asked to join.
+    ///
+    /// Goes only to the person invited. The rest of the group hears when the
+    /// invitation is *accepted* — that's the moment shares actually move, and
+    /// announcing the asking would have the group told twice about one arrival.
+    func announceInvitation(of traveller: Traveller, to trip: Trip) {
+        guard traveller.id != Traveller.you.id else { return }
+
+        post(
+            AppNotification(
+                kind: .invited,
+                title: "\(Traveller.you.name) invited you to \(trip.title)",
+                body: "\(trip.destination.isEmpty ? "A trip" : trip.destination) · \(trip.dateRange). Have a look before you accept — you won't be on it, or on its ledger, until you do.",
+                tripID: trip.id
+            ),
+            to: [traveller.id]
+        )
+    }
+
+    /// Somebody has asked to leave a trip that's already running.
+    ///
+    /// This goes to the organisers rather than the whole group, because it's
+    /// addressed to whoever has to answer it — everyone else hears about it
+    /// once it's actually happened, which is `announceDeparture`. Two events
+    /// for two different facts: a request, and a change.
+    func announceDepartureRequest(_ plan: DeparturePlan, in trip: Trip) {
+        let recipients = trip.organisers
+            .map(\.id)
+            .filter { $0 != plan.traveller.id && !trip.hasLeft($0) }
+        guard !recipients.isEmpty else { return }
+
+        let name = plan.traveller.id == Traveller.you.id ? "You" : plan.traveller.name
+        let verb = plan.traveller.id == Traveller.you.id ? "want" : "wants"
+
+        post(
+            AppNotification(
+                kind: .departureRequested,
+                title: "\(name) \(verb) to leave \(trip.title)",
+                body: plan.affectsOthers
+                    ? "Review it before it's final — it moves everyone else's share by \(Money.format(abs(plan.groupImpactEach).rounded(), code: trip.currencyCode))."
+                    : "Review it before it's final. Nobody else's share changes.",
+                tripID: trip.id
+            ),
+            to: recipients
+        )
+    }
+
+    /// The exit went through. Everyone hears, because everyone's ledger just
+    /// stopped moving for that person — and the figure in the body is the
+    /// thing anybody will actually want to know.
+    func announceDeparture(_ departure: TripDeparture, of traveller: Traveller, in trip: Trip) {
+        let recipients = trip.travellers.map(\.id).filter { $0 != Traveller.you.id }
+        guard !recipients.isEmpty else { return }
+
+        let day = trip.departureDayIndex(traveller.id).map { "Day \($0)" }
+            ?? DateFormatter.cached("d MMM").string(from: departure.leftAt)
+        let balance = departure.agreedBalance
+
+        post(
+            AppNotification(
+                kind: .left,
+                title: "\(traveller.name) left \(trip.title)",
+                body: abs(balance) < SettlementEngine.epsilon
+                    ? "They were on it to \(day), and they're square with everyone."
+                    : balance > 0
+                        ? "They were on it to \(day). The group owes them \(Money.format(abs(balance).rounded(), code: trip.currencyCode))."
+                        : "They were on it to \(day). They owe \(Money.format(abs(balance).rounded(), code: trip.currencyCode)).",
                 tripID: trip.id
             ),
             to: recipients
@@ -303,13 +294,16 @@ extension NotificationStore {
         )
     }
 
-    /// Somebody paid. Goes to everybody the cost lands on, and asks them.
+    /// Somebody paid. Goes to everybody the cost lands on — purely as news:
+    /// the payment is taken as confirmed the moment it's recorded, and
+    /// anyone who thinks it's wrong reports it from the booking itself
+    /// rather than answering this.
     func announcePayment(of item: ItineraryItem, by payerID: UUID, in trip: Trip) {
         let payer = trip.traveller(payerID)?.name ?? "Someone"
         let bearers = Set(trip.bearers(of: item).map(\.id))
 
-        // Only the people it costs something. Being asked to confirm a
-        // payment you have no share in is a question you can't answer.
+        // Only the people it costs something — nobody else has a stake in
+        // knowing.
         let recipients = trip.travellers
             .map(\.id)
             .filter { $0 != Traveller.you.id && ($0 == payerID || bearers.contains($0)) }
@@ -325,7 +319,43 @@ extension NotificationStore {
                 body: each > 0
                     ? "\(Money.format(item.cost, code: trip.currencyCode))\(method). Your share is \(Money.format(each, code: trip.currencyCode))."
                     : "\(Money.format(item.cost, code: trip.currencyCode))\(method).",
-                tripID: trip.id
+                tripID: trip.id,
+                itemID: item.id
+            ),
+            to: recipients
+        )
+    }
+
+    /// Payment on a booking was disputed.
+    func announceDispute(of item: ItineraryItem, in trip: Trip) {
+        let recipients = audience(of: trip)
+        guard !recipients.isEmpty else { return }
+
+        let reasonSuffix = item.disputeReason.map { " (\($0))" } ?? ""
+        post(
+            AppNotification(
+                kind: .disputed,
+                title: "\(actor()) disputed a payment on \(trip.title)",
+                body: "\(item.title)\(reasonSuffix) — worth reviewing before anyone settles up.",
+                tripID: trip.id,
+                itemID: item.id
+            ),
+            to: recipients
+        )
+    }
+
+    /// Dispute on a booking was resolved.
+    func announceDisputeResolved(for item: ItineraryItem, in trip: Trip) {
+        let recipients = audience(of: trip)
+        guard !recipients.isEmpty else { return }
+
+        post(
+            AppNotification(
+                kind: .confirmed,
+                title: "\(actor()) resolved payment dispute on \(trip.title)",
+                body: "\(item.title) — payment dispute has been marked as resolved.",
+                tripID: trip.id,
+                itemID: item.id
             ),
             to: recipients
         )

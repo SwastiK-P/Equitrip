@@ -15,6 +15,7 @@ import MapKit
 struct TripsMapView: View {
     @Environment(\.tripStore) private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.pane) private var pane
 
     @State private var pins: [TripPin] = []
     @State private var selection: UUID?
@@ -39,7 +40,7 @@ struct TripsMapView: View {
 
             topBar
         }
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: pane.isRegular ? .bottomLeading : .bottom) {
             if let selected {
                 TripMapCard(
                     trip: selected.trip,
@@ -51,7 +52,8 @@ struct TripsMapView: View {
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) { selection = nil }
                     }
                 )
-                .transition(.move(edge: .bottom))
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .padding(pane.isRegular ? 18 : 0)
             }
         }
         // Applied to the whole composite, not to the card inside it. The
@@ -116,7 +118,7 @@ struct TripsMapView: View {
                 Button {
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
                         selection = nil
-                        camera = .automatic
+                        fitAll()
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -166,6 +168,46 @@ struct TripsMapView: View {
         }
 
         pins = resolved
+        fitAll()
+    }
+
+    /// Frames every pin at once, with extra breathing room on the left and
+    /// right — `.automatic`'s own fit ran pins right up to the screen edge,
+    /// which crops a trip's cover art badly for anything near the antimeridian
+    /// of the group.
+    private func fitAll() {
+        guard !pins.isEmpty else {
+            camera = .automatic
+            return
+        }
+
+        let lats = pins.map(\.coordinate.latitude)
+        let lons = pins.map(\.coordinate.longitude)
+        guard let minLat = lats.min(), let maxLat = lats.max(),
+              let minLon = lons.min(), let maxLon = lons.max() else {
+            camera = .automatic
+            return
+        }
+
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+
+        // Single-pin trips would otherwise collapse the span to zero, so a
+        // floor keeps that case zoomed out to something sensible.
+        let latSpread = Swift.max(maxLat - minLat, 4)
+        let lonSpread = Swift.max(maxLon - minLon, 4)
+
+        camera = .region(
+            MKCoordinateRegion(
+                center: center,
+                span: MKCoordinateSpan(
+                    latitudeDelta: latSpread * 1.35,
+                    longitudeDelta: lonSpread * 1.9
+                )
+            )
+        )
     }
 
     /// Cached across the session — the same handful of destinations would
@@ -261,31 +303,44 @@ private struct Triangle: Shape {
 /// and glass, so France is still visible through it and the map never stops
 /// being the thing you're using.
 private struct TripMapCard: View {
+    @Environment(\.pane) private var pane
+
     let trip: Trip
     let onOpen: () -> Void
     let onClose: () -> Void
 
     private let corner: CGFloat = 34
 
+    /// A sheet on a phone, a floating panel on iPad.
+    ///
+    /// The card came up from the bottom edge because on a phone that is the
+    /// only place a second layer can come from. On iPad the map is a room
+    /// rather than a strip, and a 1200pt bar pinned to the floor hides the
+    /// southern third of it to say four things about one trip. Unpinned, it
+    /// becomes what Maps itself uses: a panel in the corner, rounded all
+    /// round, with the map carrying on behind and beside it.
+    private var floats: Bool { pane.isRegular }
+
     var body: some View {
         VStack(spacing: 0) {
-            grabber
+            if !floats { grabber }
             headline
             facts
             openButton
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: floats ? 380 : .infinity)
         .glassEffect(
             .regular,
             in: UnevenRoundedRectangle(
                 topLeadingRadius: corner,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0,
+                bottomLeadingRadius: floats ? corner : 0,
+                bottomTrailingRadius: floats ? corner : 0,
                 topTrailingRadius: corner,
                 style: .continuous
             )
         )
         .overlay(alignment: .topTrailing) { closeButton }
+        .padding(.top, floats ? 18 : 0)
     }
 
     /// Not draggable — the map's own pins are how you change selection. It's
@@ -363,7 +418,7 @@ private struct TripMapCard: View {
             divider
 
             VStack(spacing: 5) {
-                AvatarStack(travellers: trip.travellers, size: 24, max: 4)
+                AvatarStack(travellers: trip.travellers, size: 24, max: 4, departedIDs: trip.departedIDs)
 
                 Text("going")
                     .font(.system(size: 10.5, weight: .medium))
@@ -418,8 +473,9 @@ private struct TripMapCard: View {
         .tint(AppTheme.accent)
         .padding(.horizontal, 20)
         .padding(.top, 14)
-        // Clears the home indicator, since the modal extends beneath it.
-        .padding(.bottom, 30)
+        // Clears the home indicator, since the modal extends beneath it —
+        // which a floating panel doesn't, so it takes a plain card inset.
+        .padding(.bottom, pane.isRegular ? 20 : 30)
     }
 
     private var closeButton: some View {

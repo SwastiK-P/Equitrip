@@ -48,7 +48,7 @@ struct ExtractedDayPlan {
 
 @Generable(description: "One entry on a day's plan")
 struct ExtractedItem {
-    @Guide(description: "What the row calls this, in two or three words: 'Airport transfer', 'Eiffel Tower', 'Farewell dinner'. The name only — not the description after it.")
+    @Guide(description: "What the row calls this, in two or three words: 'Airport transfer', 'Eiffel Tower', 'Flight AI 864'. The name only — never the whole row, and never the city or address that follows it. Never answer with a bare category on its own like 'Flight', 'Hotel', 'Train' or 'Activity': include what makes it this booking, such as its number or its name.")
     var title: String
 
     @Guide(description: "Start time in 24-hour HH:mm. Empty string if the row gives no time. Never guess one.")
@@ -491,24 +491,59 @@ final class TripExtractor {
         for index in checked.indices {
             let line = day.lines[index]
             checked[index].amount = ItineraryDocument.amount(in: line) ?? 0
-            if let leading = TravelDate.time(in: String(line.prefix(8))) {
-                checked[index].minuteOfDay = leading.hour * 60 + leading.minute
-            }
+            // The row's own clock, wherever on the row it sits — and no clock
+            // at all when the row hasn't got one. A time the model supplied
+            // for a row that never mentioned one is invented, and an invented
+            // 09:30 files a booking somewhere on the day with total
+            // confidence and no way for a reader to tell.
+            checked[index].minuteOfDay = TravelDate.clockMatches(in: line).first?.minute
             if let counted = Self.trailingCount(in: line) {
                 checked[index].participantCount = counted
             }
+            checked[index].title = Self.settledTitle(checked[index].title, from: line)
             if index < described.count {
                 checked[index].detail = Self.describe(described[index], titled: checked[index].title)
             }
             // Now that the row's own words are attached, ask again — "Sacré-Cœur"
-            // says nothing on its own and "Basilica visit" settles it.
+            // says nothing on its own and "Basilica visit" settles it. Failing
+            // that, what the table this row sat under was a table of.
             if let ruled = ItineraryReasoner.classify(
                 title: checked[index].title, detail: checked[index].detail
             ) {
                 checked[index].kind = ruled
+            } else if let hinted = day.hint(at: index) {
+                checked[index].kind = hinted
             }
         }
         return checked
+    }
+
+    /// The two ways a model title goes wrong, both fixed from the row itself.
+    ///
+    /// A row with no delimiter between a booking's name and its address —
+    /// "India Gate Guided Tour New Delhi" — invites the model to hand the
+    /// whole row back as the name, and a row that opens with its category
+    /// invites the opposite, a title of just "Flight". Neither is a name, and
+    /// in both cases the row already contains the right answer.
+    private static func settledTitle(_ title: String, from line: String) -> String {
+        let cleaned = line.replacingOccurrences(
+            of: "^\\d{1,2}[:.]\\d{2}\\s*(am|pm)?\\s*", with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        let head = StructuredRowParser.splitTitle(cleaned).title
+
+        // A bare category is a label, not a name.
+        let bare = ["flight", "hotel", "train", "stay", "activity", "transfer",
+                    "booking", "tour", "check-in", "check in", "accommodation"]
+        if bare.contains(title.lowercased().trimmingCharacters(in: .whitespaces)) {
+            return head.count >= 2 ? head : title
+        }
+
+        // Five words or more isn't a name, it's the row read back.
+        let words = title.components(separatedBy: " ").filter { !$0.isEmpty }
+        if words.count >= 5, head.count >= 2 { return head }
+
+        return title
     }
 
     /// What's left of the row once its time and its name have been taken out.

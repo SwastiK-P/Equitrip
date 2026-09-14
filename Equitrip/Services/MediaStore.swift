@@ -60,6 +60,14 @@ final class MediaStore {
         try await upload(data, path: "\(itemID.uuidString).jpg", bucket: Self.receiptBucket)
     }
 
+    /// Stores proof of a direct settlement — a UPI or transfer screenshot —
+    /// against the settlement it backs. Same bucket as a booking receipt: it's
+    /// the same kind of object (a photographed confirmation of money having
+    /// moved), just attached to a settlement id instead of an item id.
+    func uploadSettlementProof(_ data: Data, for settlementID: UUID) async throws -> URL {
+        try await upload(data, path: "settlement-\(settlementID.uuidString).jpg", bucket: Self.receiptBucket)
+    }
+
     /// One path per owner, so replacing an image overwrites rather than
     /// accumulating orphans. The cache-busting token is what stops the
     /// replaced file from carrying on being served.

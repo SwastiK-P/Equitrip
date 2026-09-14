@@ -50,6 +50,8 @@ enum AuthMode {
 }
 
 struct AuthView: View {
+    @Environment(\.pane) private var pane
+
     let mode: AuthMode
     var onBack: () -> Void = {}
     var onSwitchMode: (AuthMode) -> Void = { _ in }
@@ -140,6 +142,20 @@ struct AuthView: View {
                     }
                 }
                 .padding(.horizontal, 24)
+                // A sign-in form is four controls in a stack; stretched across
+                // a landscape iPad each field becomes a 1200pt trough with a
+                // caret at one end. Capped tighter than the app's usual prose
+                // measure — a form column wants to be about as wide as its
+                // widest field needs to be and no wider — and centred in the
+                // window rather than pinned to the top left of it.
+                .frame(maxWidth: pane.isRegular ? 460 : .infinity)
+                .frame(maxWidth: .infinity)
+                // Top-aligned, not centred: the form grows by a field when
+                // you switch to Create account and shrinks again coming back,
+                // and a centred column moves every control on the screen each
+                // time it does. Kept off the very top instead, which reads as
+                // placed rather than as stuck to the edge.
+                .padding(.top, pane.isRegular ? 40 : 0)
                 .padding(.bottom, 28)
             }
             .scrollIndicators(.hidden)

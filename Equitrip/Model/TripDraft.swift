@@ -10,6 +10,11 @@ import SwiftUI
 /// Both routes into the flow — a parsed PDF and a hand-filled form — land here,
 /// so the review screen and the save path only ever deal with one shape.
 struct TripDraft {
+    /// Fixed for the life of the draft so a cover picked before the trip is
+    /// saved persists under the same key the finished `Trip` will use —
+    /// otherwise a photo chosen on the review screen would be orphaned the
+    /// moment `makeTrip()` minted a different id for it.
+    var id: UUID = UUID()
     var title: String = ""
     var destination: String = ""
     var startDate: Date = Calendar.current.startOfDay(for: Date())
@@ -95,6 +100,7 @@ struct TripDraft {
         }
 
         return Trip(
+            id: id,
             title: title.trimmingCharacters(in: .whitespaces),
             destination: destination.trimmingCharacters(in: .whitespaces),
             startDate: startDate,
@@ -131,8 +137,18 @@ struct TripDraft {
         // and the next screen asks for the rest.
         draft.travellers = [.you]
 
-        let ids = Set(draft.travellers.map(\.id))
-        draft.items = progress.items.map { $0.asItineraryItem(participantIDs: ids) }
+        // Empty, not "just you" — empty is what `makeTrip()` reads as "everyone
+        // on the trip", and it re-reads it at the moment the trip is actually
+        // saved, once the participants screen has added the rest of the group.
+        // Seeding this as `{you.id}` looked equivalent while the trip only had
+        // one traveller, but it isn't the same rule — it's a snapshot of that
+        // moment, and `participantIDs` being non-empty is exactly what stops
+        // `makeTrip()`'s "everyone" fallback from ever running. Every imported
+        // booking stayed pinned to whichever one person happened to run the
+        // import: their avatar alone on every timeline card, and — for a stay
+        // or activity, which shares by participants rather than by everyone —
+        // the actual cost silently charged to them alone too.
+        draft.items = progress.items.map { $0.asItineraryItem(participantIDs: []) }
 
         // Trust the bookings over anything the reader said about the span.
         let dates = draft.items.map(\.day).sorted()

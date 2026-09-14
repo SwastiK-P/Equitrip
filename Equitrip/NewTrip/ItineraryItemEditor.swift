@@ -22,6 +22,7 @@ struct ItineraryItemEditor: View {
     @State private var showCameraUnavailableAlert = false
     @State private var showParticipants = false
     @State private var showPayment = false
+    @State private var confirmingDelete = false
 
     let travellers: [Traveller]
     let currencyCode: String
@@ -112,7 +113,7 @@ struct ItineraryItemEditor: View {
                 participants
                 payment
 
-                if let onDelete { deleteButton(onDelete) }
+                if onDelete != nil { deleteButton }
 
                 Color.clear.frame(height: 10)
             }
@@ -166,6 +167,25 @@ struct ItineraryItemEditor: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Boarding pass scanning needs a real device's camera. Type the flight number instead.")
+        }
+        .confirmationDialog(
+            "Remove this booking?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Remove booking", role: .destructive) {
+                onDelete?()
+                GlassToastCenter.shared.show(.init(
+                    symbol: "trash",
+                    tint: AppTheme.danger,
+                    title: "Booking removed",
+                    subtitle: "\"\(draft.title)\" is gone from the itinerary and the ledger."
+                ))
+                dismiss()
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text("This takes it out of the itinerary and the ledger for everyone on the trip. It can't be undone.")
         }
     }
 
@@ -650,7 +670,7 @@ struct ItineraryItemEditor: View {
 
     private func amountRow(_ traveller: Traveller) -> some View {
         HStack(spacing: 12) {
-            MemojiAvatar(traveller: traveller, size: 30)
+            TravellerAvatar(traveller: traveller, size: 30)
 
             Text(traveller.id == Traveller.you.id ? "\(traveller.name) (you)" : traveller.name)
                 .font(.system(size: 15))
@@ -783,7 +803,7 @@ struct ItineraryItemEditor: View {
 
     /// A row, not a chip wall.
     ///
-    /// The wall carried selection in a tint and a desaturated memoji, which
+    /// The wall carried selection in a tint and a desaturated avatar, which
     /// nobody reads as on or off, and eight people wrapped onto four rows that
     /// pushed the split rule and the save bar off screen. The row states who's
     /// on it and what they each owe in one line; the sheet behind it uses real
@@ -855,7 +875,7 @@ struct ItineraryItemEditor: View {
             } label: {
                 HStack(spacing: 12) {
                     if let payer = paidBy {
-                        MemojiAvatar(traveller: payer, size: 34)
+                        TravellerAvatar(traveller: payer, size: 34)
                     } else {
                         SymbolBadge(symbol: "creditcard", tint: AppTheme.accent, size: 34)
                     }
@@ -922,10 +942,10 @@ struct ItineraryItemEditor: View {
 
     // MARK: - Actions
 
-    private func deleteButton(_ action: @escaping () -> Void) -> some View {
+    private var deleteButton: some View {
         Button {
-            action()
-            dismiss()
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            confirmingDelete = true
         } label: {
             Text("Remove booking")
                 .font(.system(size: 15, weight: .semibold))
@@ -968,6 +988,13 @@ struct ItineraryItemEditor: View {
             // booking is already saved rather than making the user wait on it.
             let saved = draft
             onSave(saved)
+            GlassToastCenter.shared.show(.init(
+                symbol: "checkmark.circle.fill",
+                tint: AppTheme.positive,
+                title: isNew ? "Booking added" : "Booking updated",
+                subtitle: "\"\(saved.title)\" is saved.",
+                duration: .seconds(3)
+            ))
             Task {
                 if let symbol = await ActivityIconSuggester.symbol(for: saved.title, kind: saved.kind),
                    symbol != saved.suggestedSymbol {

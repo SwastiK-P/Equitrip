@@ -26,7 +26,6 @@ struct JoinTripFlow: View {
     @State private var error: String?
     /// Both steps hit the network now, so both can be in flight.
     @State private var isWorking = false
-    @State private var showTravellers = false
     @FocusState private var codeFocused: Bool
 
     /// The white the scanner's burst ends on, held here rather than inside the
@@ -73,6 +72,9 @@ struct JoinTripFlow: View {
                         .transition(.opacity.combined(with: .move(edge: .trailing)))
                 }
             }
+            // Same measure as the rest of the new-trip flow — except the
+            // scanner, which is a camera feed and wants the whole window.
+            .readableWidth(unless: stage == .scanning)
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
         // The scanner carries its own controls — see `QRScanScreen.topBar` —
@@ -85,18 +87,6 @@ struct JoinTripFlow: View {
                 .opacity(flash ? 1 : 0)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
-        }
-        .sheet(isPresented: $showTravellers) {
-            if let matched {
-                // Read-only: you can look at who's coming before you commit to
-                // joining, but you're not on the trip yet and have no business
-                // editing its roster.
-                TravellerPickerSheet(
-                    travellers: .constant(matched.travellers),
-                    organiserIDs: .constant(matched.organiserIDs),
-                    isEditable: false
-                )
-            }
         }
         .onAppear {
             if let initialCode {
@@ -135,6 +125,7 @@ struct JoinTripFlow: View {
             Color.clear.frame(width: 40, height: 40)
         }
         .padding(.horizontal, 20)
+        .readableWidth()
         .padding(.top, 4)
         .padding(.bottom, 10)
     }
@@ -224,31 +215,20 @@ struct JoinTripFlow: View {
     private var codeTooShort: Bool { Trip.normaliseCode(code).count < 4 }
 
     private var codeField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "number")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(AppTheme.inkTertiary)
-                .frame(width: 18)
-
-            TextField("AM9-PXQ", text: $code)
-                .font(.system(size: 20, weight: .semibold, design: .monospaced))
-                .foregroundStyle(AppTheme.ink)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-                .focused($codeFocused)
-                .submitLabel(.go)
-                .onSubmit { resolve() }
-                .onChange(of: code) { _, new in
-                    // Re-group as they type so the field always matches the
-                    // shape printed on the invite card.
-                    let formatted = Trip.formatCode(new)
-                    if formatted != new { code = formatted }
-                    error = nil
-                }
+        CodeSlotsField(
+            text: $code,
+            length: Trip.codeLength,
+            groupAfter: 3,
+            onSubmit: { resolve() },
+            isFocused: $codeFocused
+        )
+        .onChange(of: code) { _, new in
+            // Re-group as they type so the field always matches the shape
+            // printed on the invite card.
+            let formatted = Trip.formatCode(new)
+            if formatted != new { code = formatted }
+            error = nil
         }
-        .padding(.horizontal, 14)
-        .frame(height: 56)
-        .panelSurface(corner: 16)
     }
 
     // MARK: - Scanning
@@ -292,156 +272,25 @@ struct JoinTripFlow: View {
 
     // MARK: - Preview
 
+    /// The trip, and the decision. Shared with the invitation sheet — see
+    /// `TripPreview`, which is the same screen for the same question, reached
+    /// two ways. This stage owns the flow around it and nothing of the layout.
     @ViewBuilder
     private var preview: some View {
         if let trip = matched {
-            ScrollView {
-                VStack(spacing: 18) {
-                    DestinationImage(
-                        query: trip.destination,
-                        photo: trip.cover,
-                        fallbackSymbol: trip.symbol,
-                        fallbackTint: trip.tint
-                    )
-                    .frame(height: 170)
-                    .frame(maxWidth: .infinity)
-                    .overlay(alignment: .bottom) {
-                        LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 100)
-                    }
-                    .overlay(alignment: .bottomLeading) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(trip.title)
-                                .font(.system(size: 23, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                            Text("\(trip.dateRange) · \(trip.destination)")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.9))
-                        }
-                        .lineLimit(1)
-                        .shadow(color: .black.opacity(0.45), radius: 6, y: 1)
-                        .padding(16)
-                    }
-                    .clipShape(.rect(cornerRadius: 24, style: .continuous))
-
-                    summary(of: trip)
-                    travellers(of: trip)
-
-                    if stage == .joined {
-                        joinedConfirmation(trip)
-                    } else {
-                        joinButton(trip)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 4)
-                .padding(.bottom, 30)
-            }
-            .scrollIndicators(.hidden)
+            TripPreview(
+                trip: trip,
+                source: .code,
+                isWorking: isWorking,
+                isJoined: stage == .joined,
+                onJoin: { join(trip) },
+                // No decline: somebody who typed a code went looking for this
+                // trip, and the answer to "not this one" is the back button
+                // they already have.
+                onDecline: nil,
+                onDone: { dismiss() }
+            )
         }
-    }
-
-    /// Reads `bookingCount` and `projectedCost` rather than the items.
-    ///
-    /// It can't read the items: `itinerary_items` is scoped to trip members by
-    /// row-level security and the person on this screen isn't one yet, so the
-    /// list always came back empty and a fully-planned trip previewed as
-    /// "0 bookings · ₹0". The server sends the two aggregates instead.
-    private func summary(of trip: Trip) -> some View {
-        HStack(spacing: 0) {
-            previewCell(value: "\(trip.dayCount)", label: trip.dayCount == 1 ? "day" : "days")
-            previewDivider
-            previewCell(value: "\(trip.bookingCount)", label: trip.bookingCount == 1 ? "booking" : "bookings")
-            previewDivider
-            previewCell(value: trip.projectedLabel, label: "projected cost")
-        }
-        .padding(.vertical, 15)
-        .cardSurface(corner: 20)
-    }
-
-    private var previewDivider: some View {
-        Rectangle().fill(AppTheme.cardStroke.opacity(0.10)).frame(width: 1, height: 30)
-    }
-
-    private func previewCell(value: String, label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundStyle(AppTheme.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(AppTheme.inkTertiary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func travellers(of trip: Trip) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("WHO'S GOING · \(trip.travellers.count)")
-                .font(.system(size: 10.5, weight: .bold))
-                .tracking(0.9)
-                .foregroundStyle(AppTheme.inkTertiary)
-                .padding(.leading, 2)
-
-            TravellerSummaryRow(travellers: trip.travellers, organisers: trip.organisers) {
-                showTravellers = true
-            }
-        }
-    }
-
-    private func joinButton(_ trip: Trip) -> some View {
-        VStack(spacing: 8) {
-            Button {
-                join(trip)
-            } label: {
-                HStack(spacing: 7) {
-                    if isWorking {
-                        ProgressView().controlSize(.small).tint(.white)
-                    } else {
-                        Image(systemName: "person.badge.plus")
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    Text(isWorking ? "Joining…" : "Join this trip")
-                        .font(.system(size: 16, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-            }
-            .buttonStyle(.glassProminent)
-            .tint(AppTheme.accent)
-            .disabled(isWorking)
-
-            Text("You'll be added as a traveller. Nothing is charged to you until you're put on a booking.")
-                .font(.system(size: 12))
-                .foregroundStyle(AppTheme.inkTertiary)
-                .multilineTextAlignment(.center)
-        }
-    }
-
-    private func joinedConfirmation(_ trip: Trip) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 38))
-                .foregroundStyle(AppTheme.positive)
-                .transition(.scale.combined(with: .opacity))
-
-            Text("You're on the trip")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(AppTheme.ink)
-
-            Text("Everyone already on \(trip.title) gets a notification, and shares recalculate to include you.")
-                .font(.system(size: 13))
-                .foregroundStyle(AppTheme.inkSecondary)
-                .multilineTextAlignment(.center)
-
-            Button("Done") { dismiss() }
-                .buttonStyle(.glassProminent)
-                .tint(AppTheme.accent)
-                .padding(.top, 4)
-        }
-        .padding(.vertical, 8)
     }
 
     // MARK: - Actions

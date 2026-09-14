@@ -212,21 +212,46 @@ struct CardSurface: ViewModifier {
 
     var corner: CGFloat = 20
     var shadow: CGFloat = 10
+    /// Marks a card as something nobody planned ahead of time — added after
+    /// the trip was already under way, rather than during the original
+    /// itinerary pass. A dashed, accent-tinted edge instead of the usual
+    /// hairline, so it reads as "logged on the fly" at a glance rather than
+    /// needing a badge to say so.
+    var dashed: Bool = false
+    /// Overrides the top corners only — for a card that sits directly under
+    /// a fixed header it's currently attached to (see `AuditTrailSheet`),
+    /// where the header carries the rounding instead. Nil keeps all four
+    /// corners at `corner`, which is what every other card wants.
+    var topCorner: CGFloat?
+
+    private var shape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            cornerRadii: .init(
+                topLeading: topCorner ?? corner,
+                bottomLeading: corner,
+                bottomTrailing: corner,
+                topTrailing: topCorner ?? corner
+            ),
+            style: .continuous
+        )
+    }
 
     func body(content: Content) -> some View {
         content
-            .background(AppTheme.card, in: .rect(cornerRadius: corner, style: .continuous))
+            .background(AppTheme.card, in: shape)
             .overlay {
-                RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .strokeBorder(AppTheme.cardStroke.opacity(scheme == .dark ? 0.09 : 0.045))
+                shape.strokeBorder(
+                    dashed ? AppTheme.accent.opacity(0.4) : AppTheme.cardStroke.opacity(scheme == .dark ? 0.09 : 0.045),
+                    style: dashed ? StrokeStyle(lineWidth: 1.8, dash: [5, 4]) : StrokeStyle(lineWidth: 1)
+                )
             }
             .shadow(color: AppTheme.softShadow(scheme), radius: shadow, y: shadow * 0.35)
     }
 }
 
 extension View {
-    func cardSurface(corner: CGFloat = 20, shadow: CGFloat = 10) -> some View {
-        modifier(CardSurface(corner: corner, shadow: shadow))
+    func cardSurface(corner: CGFloat = 20, shadow: CGFloat = 10, dashed: Bool = false, topCorner: CGFloat? = nil) -> some View {
+        modifier(CardSurface(corner: corner, shadow: shadow, dashed: dashed, topCorner: topCorner))
     }
 }
 
@@ -413,18 +438,27 @@ struct NotificationBellButton: View {
 
 // MARK: - Travellers
 
-/// The memoji artwork already carries its own pastel backdrop, so clipping to
-/// a circle gives a perfectly matched fill with no extra tinting.
+/// The avatar artwork is a filled circle in its own right, cropped so the
+/// art's edge *is* the frame's edge — clipping to a circle lands exactly on
+/// it, with nothing behind to tint and no rim of background left over.
 ///
-/// A traveller who has uploaded a photograph gets that instead of the memoji,
-/// not behind it — the two are exclusive, not layered. The memoji is only
+/// A traveller who has uploaded a photograph gets that instead of the avatar,
+/// not behind it — the two are exclusive, not layered. The avatar is only
 /// ever what's drawn while the photo is still loading; once it succeeds the
-/// memoji is gone entirely, and a broken URL falls back to it rather than
+/// avatar is gone entirely, and a broken URL falls back to it rather than
 /// showing both at once.
-struct MemojiAvatar: View {
+struct TravellerAvatar: View {
     @Environment(\.colorScheme) private var scheme
     let traveller: Traveller
     var size: CGFloat
+    /// Drawn greyed and slightly faded — how somebody who has left a trip
+    /// appears everywhere their face still does.
+    ///
+    /// Desaturation rather than a badge, because the avatar row is already on
+    /// screen in a dozen places and a badge on each of them would need a
+    /// legend. Grey reads as "not current" without one, and the name and dates
+    /// are one tap away for anybody who wants them.
+    var isDimmed: Bool = false
 
     var body: some View {
         Group {
@@ -433,23 +467,28 @@ struct MemojiAvatar: View {
                     if case let .success(image) = phase {
                         image.resizable().scaledToFill()
                     } else {
-                        memoji
+                        artwork
                     }
                 }
             } else {
-                memoji
+                artwork
             }
         }
         .frame(width: size, height: size)
         .clipShape(.circle)
+        .saturation(isDimmed ? 0 : 1)
+        .opacity(isDimmed ? 0.55 : 1)
         .overlay {
-            Circle().strokeBorder(AppTheme.card, lineWidth: size > 30 ? 2.5 : 1.5)
+            Circle().strokeBorder(AppTheme.card, lineWidth: size > 30 ? 1.5 : 1)
         }
         .shadow(color: AppTheme.softShadow(scheme), radius: 5, y: 2)
     }
 
-    private var memoji: some View {
-        Image(traveller.asset)
+    /// Filled, not fitted, and unpadded: the art already ends where the circle
+    /// does, so insetting it would reintroduce the empty ring this artwork was
+    /// cropped to remove.
+    private var artwork: some View {
+        Image(Traveller.artwork(for: traveller.asset))
             .resizable()
             .scaledToFill()
     }
@@ -461,6 +500,10 @@ struct AvatarStack: View {
     let travellers: [Traveller]
     var size: CGFloat = 32
     var max: Int = 4
+    /// Anyone who has left the trip. Greyed in place rather than dropped, so
+    /// a booking they were on still shows who was actually on it — the group
+    /// that ate that dinner doesn't change because one of them flew home.
+    var departedIDs: Set<UUID> = []
 
     private var shown: ArraySlice<Traveller> { travellers.prefix(max) }
     private var overflow: Int { Swift.max(0, travellers.count - max) }
@@ -468,8 +511,12 @@ struct AvatarStack: View {
     var body: some View {
         HStack(spacing: -size * 0.3) {
             ForEach(Array(shown.enumerated()), id: \.offset) { slot, traveller in
-                MemojiAvatar(traveller: traveller, size: size)
-                    .zIndex(Double(shown.count - slot))
+                TravellerAvatar(
+                    traveller: traveller,
+                    size: size,
+                    isDimmed: departedIDs.contains(traveller.id)
+                )
+                .zIndex(Double(shown.count - slot))
             }
 
             if overflow > 0 {
@@ -478,7 +525,7 @@ struct AvatarStack: View {
                     .foregroundStyle(AppTheme.inkSecondary)
                     .frame(width: size, height: size)
                     .background(AppTheme.canvasBottom, in: .circle)
-                    .overlay { Circle().strokeBorder(AppTheme.card, lineWidth: size > 30 ? 2.5 : 1.5) }
+                    .overlay { Circle().strokeBorder(AppTheme.card, lineWidth: size > 30 ? 1.5 : 1) }
             }
         }
         .accessibilityElement()
@@ -500,6 +547,11 @@ struct Traveller: Identifiable, Hashable {
     let isRegistered: Bool
     /// A photograph they uploaded, which wins over `asset` when present.
     let avatarURL: URL?
+    /// The VPA this person pays into, as they set it in their own Settings.
+    /// Nil (not empty) means they haven't set one — the distinction that
+    /// keeps a settle sheet from offering an editable field for someone
+    /// else's payment details.
+    let upiVPA: String?
 
     init(
         id: UUID = UUID(),
@@ -507,7 +559,8 @@ struct Traveller: Identifiable, Hashable {
         asset: String,
         email: String? = nil,
         isRegistered: Bool = false,
-        avatarURL: URL? = nil
+        avatarURL: URL? = nil,
+        upiVPA: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -515,6 +568,7 @@ struct Traveller: Identifiable, Hashable {
         self.email = email
         self.isRegistered = isRegistered
         self.avatarURL = avatarURL
+        self.upiVPA = upiVPA
     }
 
     var initial: String { String(name.prefix(1)) }
@@ -523,23 +577,44 @@ struct Traveller: Identifiable, Hashable {
     // renames from SwiftUI, and "you" keeps one fixed id across the sign-in
     // that finally gives it a real name.
 
-    static let ed = Traveller(name: "Ed", asset: "MemojiEd")
-    static let krishna = Traveller(name: "Krishna", asset: "MemojiKrishna")
-    static let mattew = Traveller(name: "Mattew", asset: "MemojiMattew")
-    static let kim = Traveller(name: "Kim", asset: "MemojiKim")
+    static let ed = Traveller(name: "Ed", asset: "Avatar02")
+    static let krishna = Traveller(name: "Krishna", asset: "Avatar05")
+    static let mattew = Traveller(name: "Mattew", asset: "Avatar09")
+    static let kim = Traveller(name: "Kim", asset: "Avatar14")
     /// Onboarding-only — shown before sign-in, so it needs a person who
-    /// isn't "you". Reuses the Chris artwork; nothing else references it by
-    /// name.
-    static let priya = Traveller(name: "Priya", asset: "MemojiChris")
+    /// isn't "you". Nothing else references it by name.
+    static let priya = Traveller(name: "Priya", asset: "Avatar01")
 
     /// The signed-in traveller.
     static var you: Traveller { CurrentUser.traveller }
 
     static var all: [Traveller] { [you, ed, krishna, mattew, kim] }
 
-    /// Every memoji somebody can pick for themselves. Ordered, so the picker
+    /// Every avatar somebody can pick for themselves. Ordered, so the picker
     /// doesn't reshuffle between openings.
-    static let memoji = ["MemojiChris", "MemojiEd", "MemojiKrishna", "MemojiMattew", "MemojiKim"]
+    static let avatars = (1...15).map { String(format: "Avatar%02d", $0) }
+
+    /// The artwork to actually draw for a stored asset name.
+    ///
+    /// Profile rows outlive the artwork: rows written before this set hold
+    /// names from the old memoji one — `MemojiChris` from the original schema
+    /// default, `Memoji42` from the picker that replaced it — and `Image(_:)`
+    /// draws *nothing* for a name the catalogue doesn't have, so those people
+    /// would show up as an empty circle until they next opened the picker.
+    /// Anything unrecognised is folded onto the new set instead, by name, so
+    /// the same stored value picks the same face on every device.
+    static func artwork(for asset: String) -> String {
+        guard !avatars.contains(asset) else { return asset }
+        return avatars[Int(stableHash(asset) % UInt64(avatars.count))]
+    }
+
+    /// Spelled out rather than `hashValue`, which is seeded per process and
+    /// would hand the same person a different face on every launch.
+    static func stableHash(_ text: String) -> UInt64 {
+        text.unicodeScalars.reduce(into: UInt64(5381)) { total, scalar in
+            total = total &* 33 &+ UInt64(scalar.value)
+        }
+    }
 }
 
 /// Who "you" are, app-wide.
@@ -550,10 +625,10 @@ struct Traveller: Identifiable, Hashable {
 /// when the session resolves.
 enum CurrentUser {
     private nonisolated(unsafe) static var displayName = "You"
-    /// The memoji behind the avatar. Overwritten by whichever one the user
-    /// picks, and by whatever their profile row already said on sign-in.
-    private nonisolated(unsafe) static var avatarAsset = "MemojiChris"
-    /// A photograph they chose, which wins over the memoji.
+    /// The avatar artwork behind the face. Overwritten by whichever one the
+    /// user picks, and by whatever their profile row already said on sign-in.
+    private nonisolated(unsafe) static var avatarAsset = "Avatar01"
+    /// A photograph they chose, which wins over the avatar.
     private nonisolated(unsafe) static var avatarURL: URL?
     /// A random UUID until the Supabase profile resolves, so the app has an
     /// identity to work with offline or before sign-in finishes. Everything
@@ -564,6 +639,8 @@ enum CurrentUser {
     /// The signed-in address. Held so "you" is the same shape of traveller as
     /// everyone else — identified by email — rather than a special case.
     private nonisolated(unsafe) static var address: String?
+    /// The VPA this account pays into, as loaded from `profiles.upi_id`.
+    private nonisolated(unsafe) static var upiVPA: String?
 
     static var traveller: Traveller {
         Traveller(
@@ -572,16 +649,24 @@ enum CurrentUser {
             asset: avatarAsset,
             email: address,
             isRegistered: true,
-            avatarURL: avatarURL
+            avatarURL: avatarURL,
+            upiVPA: upiVPA
         )
     }
 
-    /// Records the face this account carries. Both together, always: a memoji
-    /// picked after a photograph has to clear that photograph, or the photo
-    /// keeps winning and the pick looks like it did nothing.
+    /// Records the face this account carries. Both together, always: an
+    /// avatar picked after a photograph has to clear that photograph, or the
+    /// photo keeps winning and the pick looks like it did nothing.
     static func adoptAvatar(asset: String, url: URL?) {
         avatarAsset = asset
         avatarURL = url
+    }
+
+    /// Records the VPA this account pays into, whether that's what the server
+    /// already had on sign-in or what the user just typed into Settings.
+    static func adoptUPI(_ vpa: String?) {
+        let trimmed = vpa?.trimmingCharacters(in: .whitespaces)
+        upiVPA = (trimmed?.isEmpty ?? true) ? nil : trimmed
     }
 
     /// Called once the session is restored. Takes the first name only — a
@@ -617,8 +702,9 @@ enum CurrentUser {
         displayName = "You"
         identity = UUID()
         address = nil
-        avatarAsset = "MemojiChris"
+        avatarAsset = "Avatar01"
         avatarURL = nil
+        upiVPA = nil
     }
 
     static func isYou(_ name: String) -> Bool {

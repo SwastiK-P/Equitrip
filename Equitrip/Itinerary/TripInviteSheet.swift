@@ -152,7 +152,7 @@ private struct InviteTicket: View {
 
     /// Where the tear sits, measured from the top. Shared by the shape and
     /// the layout so the notches land exactly on the perforation.
-    private let headHeight: CGFloat = 112
+    private let headHeight: CGFloat = 152
     private let corner: CGFloat = 28
 
     private var qr: UIImage? {
@@ -166,6 +166,15 @@ private struct InviteTicket: View {
             body_
         }
         .background(AppTheme.card, in: TicketShape(corner: corner, headHeight: headHeight))
+        // Clipped to the ticket, not just backed by it.
+        //
+        // The notch is centred on the tear, so half of each bite falls inside
+        // the photograph — and the photograph is its own view drawn on top of
+        // the background, so it filled the top half back in. The card read as
+        // torn along the bottom edge of the perforation and solid along the
+        // top, which is not how paper tears. Clipping the whole card to the
+        // same shape takes the bite out of the image too.
+        .clipShape(TicketShape(corner: corner, headHeight: headHeight))
         .overlay {
             TicketShape(corner: corner, headHeight: headHeight)
                 .stroke(AppTheme.cardStroke.opacity(scheme == .dark ? 0.10 : 0.05), lineWidth: 1)
@@ -207,7 +216,7 @@ private struct InviteTicket: View {
 
                 Spacer(minLength: 6)
 
-                AvatarStack(travellers: trip.travellers, size: 24, max: 4)
+                AvatarStack(travellers: trip.travellers, size: 24, max: 4, departedIDs: trip.departedIDs)
             }
             .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
             .padding(.horizontal, 16)
@@ -267,7 +276,7 @@ private struct InviteTicket: View {
             }
         }
         .aspectRatio(1, contentMode: .fit)
-        .frame(maxWidth: 296)
+        .frame(maxWidth: 268)
         .overlay { brackets }
         .shadow(color: AppTheme.softShadow(scheme), radius: 10, y: 5)
     }

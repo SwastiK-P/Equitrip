@@ -9,7 +9,7 @@ import SwiftUI
 ///
 /// Was a wall of tappable chips sitting inline under the form, which had two
 /// problems: a chip's selected state is carried by a tint and a desaturated
-/// memoji, which is not a thing anyone reads as "on" or "off", and eight
+/// avatar, which is not a thing anyone reads as "on" or "off", and eight
 /// people wrapped onto four rows that pushed the rest of the form off screen.
 /// A row that says who's on it, opening a list with real checkmarks, is one
 /// line either way and unambiguous about what's selected.
@@ -146,7 +146,7 @@ struct ParticipantPickerSheet: View {
             }
         } label: {
             HStack(spacing: 12) {
-                MemojiAvatar(traveller: traveller, size: 36)
+                TravellerAvatar(traveller: traveller, size: 36)
                     .saturation(on ? 1 : 0.15)
 
                 VStack(alignment: .leading, spacing: 1) {

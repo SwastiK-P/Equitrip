@@ -24,18 +24,40 @@ import SwiftUI
 /// "just happened", and a booking made in advance is exactly the case the full
 /// editor is for.
 struct QuickAddSheet: View {
+
+    /// Everything a detected payment already knows, handed to this sheet so
+    /// the person only supplies what a bank email can't say.
+    ///
+    /// A UPI alert has the amount, the minute and the VPA, and never has the
+    /// two things the ledger needs: what it was for, and who it was for. So
+    /// the seed fills in the money and the clock and leaves the title empty
+    /// and focused — which is the same screen as before, one field shorter.
+    struct Seed: Equatable {
+        var title: String = ""
+        /// Who was paid. Goes to the booking's vendor, and is offered under
+        /// the title field as a chip — see `suggestionChip`.
+        var vendor: String = ""
+        var amount: Double
+        var paidAt: Date
+        var paymentMethod: PaymentMethod
+        /// The "how do we know this" line: bank, channel, reference.
+        var provenance: String = ""
+    }
+
     @Environment(\.dismiss) private var dismiss
 
     let travellers: [Traveller]
     let currencyCode: String
     /// The day this lands on — today, unless the trip's clock disagrees.
     let day: Date
+    /// Filled in by Gmail expense detection. Nil for a plain quick add.
+    var seed: Seed?
     var onSave: (ItineraryItem) -> Void
     /// Hands what's been typed so far to the full editor.
     var onSwitchToDetailed: (ItineraryItem) -> Void
 
-    @State private var title = ""
-    @State private var amount = ""
+    @State private var title: String
+    @State private var amount: String
     @State private var participants: Set<UUID>
     @State private var payerID: UUID?
     @State private var split: SplitMode = .equal
@@ -49,14 +71,20 @@ struct QuickAddSheet: View {
         travellers: [Traveller],
         currencyCode: String,
         day: Date,
+        seed: Seed? = nil,
         onSave: @escaping (ItineraryItem) -> Void,
         onSwitchToDetailed: @escaping (ItineraryItem) -> Void
     ) {
         self.travellers = travellers
         self.currencyCode = currencyCode
         self.day = day
+        self.seed = seed
         self.onSave = onSave
         self.onSwitchToDetailed = onSwitchToDetailed
+        _title = State(initialValue: seed?.title ?? "")
+        // Whole rupees when it is one: "480" rather than "480.0" in a field
+        // somebody may be about to edit.
+        _amount = State(initialValue: seed.map { Money.plainAmount($0.amount) } ?? "")
         _participants = State(initialValue: Set(travellers.map(\.id)))
         // You're the one holding the phone, having just paid for something.
         _payerID = State(initialValue: travellers.first { $0.id == Traveller.you.id }?.id)
@@ -154,13 +182,36 @@ struct QuickAddSheet: View {
     /// Says out loud what it's about to record, so "no date field" doesn't read
     /// as "no date".
     private var nowLine: String {
-        "Logging for \(DateFormatter.cached("EEE d MMM").string(from: day)), \(DateFormatter.cached("h:mm a").string(from: Date()))"
+        let stamp = seed?.paidAt ?? Date()
+        let verb = seed == nil ? "Logging for" : "Paid"
+        return "\(verb) \(DateFormatter.cached("EEE d MMM").string(from: day)), \(DateFormatter.cached("h:mm a").string(from: stamp))"
     }
 
     // MARK: - Fields
 
     private var fields: some View {
         VStack(spacing: 12) {
+            if let provenance = seed?.provenance, !provenance.isEmpty {
+                // Above the fields rather than below them: the first question
+                // anyone has about a pre-filled amount is where it came from,
+                // and the answer shouldn't be underneath the thing it explains.
+                HStack(spacing: 9) {
+                    GmailMark()
+                        .frame(width: 17, height: 13)
+
+                    Text(provenance)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(AppTheme.inkSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .panelSurface(corner: 14)
+            }
+
             HStack(spacing: 12) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 15, weight: .medium))
@@ -181,6 +232,8 @@ struct QuickAddSheet: View {
             .frame(height: 60)
             .panelSurface(corner: 18)
 
+            suggestionChip
+
             HStack(spacing: 12) {
                 Text(Money.symbol(for: currencyCode))
                     .font(.system(size: 19, weight: .bold, design: .rounded))
@@ -199,6 +252,44 @@ struct QuickAddSheet: View {
             .padding(.horizontal, 16)
             .frame(height: 60)
             .panelSurface(corner: 18)
+        }
+    }
+
+    /// The payee, offered rather than assumed.
+    ///
+    /// Shown only while the title is still empty, because the moment somebody
+    /// types their own answer the suggestion is noise. One tap fills the field
+    /// — which is the right trade for "BLUE TOKAI COFFEE" and, just as
+    /// importantly, no trade at all for a person's name you'd rather not have
+    /// on the timeline.
+    @ViewBuilder
+    private var suggestionChip: some View {
+        if let vendor = seed?.vendor, !vendor.isEmpty, !vendor.contains("@"),
+           title.trimmingCharacters(in: .whitespaces).isEmpty {
+            HStack(spacing: 8) {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.snappy) { title = vendor }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text(vendor)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(AppTheme.accent.opacity(0.12), in: .capsule)
+                    .contentShape(.capsule)
+                }
+                .buttonStyle(PressableButtonStyle())
+
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 2)
+            .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .leading)))
         }
     }
 
@@ -265,7 +356,7 @@ struct QuickAddSheet: View {
 
     private func face(_ traveller: Traveller, on: Bool, mark: String) -> some View {
         VStack(spacing: 5) {
-            MemojiAvatar(traveller: traveller, size: 46)
+            TravellerAvatar(traveller: traveller, size: 46)
                 .saturation(on ? 1 : 0)
                 .opacity(on ? 1 : 0.4)
                 .overlay(alignment: .bottomTrailing) {
@@ -377,11 +468,18 @@ struct QuickAddSheet: View {
     /// The booking as currently typed. Shared by the save bar and the handover
     /// to the full editor, so switching modes never loses what's on screen.
     private func compose() -> ItineraryItem {
-        let now = Date()
+        // A detected payment happened when the bank said it happened, not when
+        // the sheet was opened — an alert read over breakfast about last
+        // night's dinner belongs at last night's time.
+        let now = seed?.paidAt ?? Date()
         let parts = Calendar.current.dateComponents([.hour, .minute], from: now)
 
         return ItineraryItem(
             title: title.trimmingCharacters(in: .whitespaces),
+            // Who was paid belongs here whether or not it became the title:
+            // the ledger's vendor column is exactly this question, and the CSV
+            // export already has a place for it.
+            vendor: seed?.vendor ?? "",
             // Category is inferred after the fact — see `commit`. Until then
             // the catch-all, which is what an unclassified thing on a trip is.
             kind: .activity,
@@ -391,7 +489,7 @@ struct QuickAddSheet: View {
             split: split,
             participantIDs: participants,
             paidByID: payerID,
-            paymentMethod: payerID == nil ? nil : AppSettings.defaultPaymentMethod
+            paymentMethod: payerID == nil ? nil : (seed?.paymentMethod ?? AppSettings.defaultPaymentMethod)
         )
     }
 
@@ -418,6 +516,13 @@ struct QuickAddSheet: View {
         let item = compose()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         onSave(item)
+        GlassToastCenter.shared.show(.init(
+            symbol: "checkmark.circle.fill",
+            tint: AppTheme.positive,
+            title: "Expense logged",
+            subtitle: "\"\(item.title)\" is on the ledger.",
+            duration: .seconds(3)
+        ))
         dismiss()
 
         // The classification runs after the booking is already on the timeline.

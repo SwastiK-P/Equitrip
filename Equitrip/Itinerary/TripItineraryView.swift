@@ -16,6 +16,7 @@ struct TripItineraryView: View {
     @Environment(\.tripStore) private var store
     @Environment(\.notificationStore) private var notifications
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.pane) private var pane
 
     /// The trip this screen is for. Passed in by the list that pushed it,
     /// rather than read from a shared "selected" slot, so pushing two
@@ -24,6 +25,10 @@ struct TripItineraryView: View {
 
     @State private var section: Section = .timeline
     @State private var scope: Scope = .group
+    /// Days folded shut. Keyed by the day's own date rather than an index, so
+    /// a day someone closed stays closed across a reload that reorders or
+    /// adds days around it.
+    @State private var collapsedDays: Set<Date> = []
     @State private var showEditor = false
     @State private var editingItem: ItineraryItem?
     @State private var viewingItem: ItineraryItem?
@@ -34,6 +39,17 @@ struct TripItineraryView: View {
     @State private var detailedAdd: ItineraryItem?
     @State private var showTravellers = false
     @State private var showShare = false
+    /// Who is being taken off the trip, when the leave flow is open.
+    @State private var leaving: Traveller?
+    /// A proposal being answered, and a closed exit being read. Two sheets
+    /// rather than one with a mode: one of them has an answer to give and the
+    /// other is a receipt, and they should never be mistaken for each other.
+    /// The cover photograph's own colour, which the iPad trip sheet is washed
+    /// in. Nil until it's been sampled; the sheet falls back to the trip tint.
+    @State private var coverTint: Color?
+    @Namespace private var pillSpace
+    @State private var reviewingDeparture: TripDeparture?
+    @State private var viewingStatement: TripDeparture?
 
     /// The trip's two faces. Not two destinations — the plan and its money are
     /// the same trip asked two different questions, and making the money a tab
@@ -59,27 +75,28 @@ struct TripItineraryView: View {
         // underneath it and the hero runs up behind it, which a top inset
         // would make impossible.
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .overlay(alignment: .top) { topBar }
+        .overlay(alignment: .top) {
+            // The iPad sheet carries its own actions; the floating bar is the
+            // phone's, where there's no panel to put them in.
+            if !(pane.isWide && trip != nil) { topBar }
+        }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showTravellers) {
             if let trip {
                 TravellerPickerSheet(
                     travellers: Binding(
                         get: { trip.travellers },
+                        // Removals only. Somebody joining a trip that exists
+                        // now goes through `onInvite` — an addition can't
+                        // arrive here any more, and the arrival announcement
+                        // that used to live on this setter moved with it, to
+                        // `announceInvitation`. Writing straight through keeps
+                        // this the plain "the roster changed" path it reads as.
                         set: { updated in
-                            // Anyone newly on the list is an arrival worth
-                            // announcing — their share of every equally-split
-                            // booking changes what everyone else owes.
-                            let existing = Set(trip.travellers.map(\.id))
-                            let arrivals = updated.filter { !existing.contains($0.id) }
-
                             var copy = trip
                             copy.travellers = updated
+                            copy.invitedIDs = copy.invitedIDs.intersection(updated.map(\.id))
                             store.update(copy)
-
-                            for arrival in arrivals {
-                                notifications.announceJoin(of: arrival, to: copy)
-                            }
                         }
                     ),
                     organiserIDs: trip.youAreOrganiser
@@ -92,9 +109,31 @@ struct TripItineraryView: View {
                             }
                         )
                         : nil,
-                    isEditable: trip.youAreOrganiser
+                    isEditable: trip.youAreOrganiser,
+                    trip: trip,
+                    // Sequenced the same way the editor hand-off is: swapping
+                    // one sheet for another while the first is still on screen
+                    // makes SwiftUI juggle two presentations at once.
+                    onLeave: { person in
+                        showTravellers = false
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(320))
+                            leaving = person
+                        }
+                    },
+                    onInvite: { store.invite($0, to: trip.id) },
+                    onCancelInvite: { store.cancelInvitation(of: $0.id, in: trip.id) }
                 )
             }
+        }
+        .sheet(item: $leaving) { person in
+            if let trip { LeaveTripSheet(trip: trip, traveller: person) }
+        }
+        .sheet(item: $reviewingDeparture) { departure in
+            if let trip { DepartureReviewSheet(trip: trip, departure: departure) }
+        }
+        .sheet(item: $viewingStatement) { departure in
+            if let trip { DepartureStatementSheet(trip: trip, departure: departure) }
         }
         .sheet(isPresented: $showShare) {
             if let trip { TripInviteSheet(trip: trip) }
@@ -146,7 +185,26 @@ struct TripItineraryView: View {
                                 editingItem = target
                             }
                         }
-                        : nil
+                        : nil,
+                    onDisputePayment: { reason in
+                        var updated = item
+                        updated.isDisputed = true
+                        updated.disputedByID = Traveller.you.id
+                        updated.disputedAt = Date()
+                        updated.disputeReason = reason
+                        updated.disputeResolvedAt = nil
+                        updated.disputeResolvedByID = nil
+                        store.disputePayment(for: item.id, in: trip.id, reason: reason)
+                        viewingItem = updated
+                    },
+                    onResolveDispute: {
+                        var updated = item
+                        updated.isDisputed = false
+                        updated.disputeResolvedAt = Date()
+                        updated.disputeResolvedByID = Traveller.you.id
+                        store.resolvePaymentDispute(for: item.id, in: trip.id)
+                        viewingItem = updated
+                    }
                 )
             }
         }
@@ -193,42 +251,424 @@ struct TripItineraryView: View {
 
     // MARK: - Content
 
+    @ViewBuilder
     private func content(for trip: Trip) -> some View {
+        Group {
+            if pane.isWide {
+                splitContent(for: trip)
+            } else {
+                stackedContent(for: trip)
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: scope)
+        .animation(.spring(response: 0.35, dampingFraction: 0.9), value: section)
+    }
+
+    /// The phone layout: one column, banner at the top, everything under it.
+    private func stackedContent(for trip: Trip) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                // Outside the measure, unlike everything below it: the banner
+                // is a photograph that runs to the edges of the screen, and a
+                // cap would leave it floating in two thin strips of canvas.
                 banner(for: trip)
 
-                GlassSegments(
-                    options: [(Section.timeline, "Timeline"), (Section.ledger, "Ledger")],
-                    selection: $section
-                )
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
+                VStack(alignment: .leading, spacing: 0) {
+                    GlassSegments(
+                        options: [(Section.timeline, "Timeline"), (Section.ledger, "Ledger")],
+                        selection: $section
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
 
-                switch section {
-                case .timeline:
-                    timeline(for: trip)
-                        .transition(.opacity)
+                    sectionBody(for: trip, showsScope: true)
 
-                case .ledger:
-                    TripLedger(trip: trip) { viewingItem = $0 }
-                        .transition(.opacity)
+                    Color.clear.frame(height: 28)
                 }
-
-                Color.clear.frame(height: 28)
+                .pageWidth()
             }
         }
         .scrollIndicators(.hidden)
         .ignoresSafeArea(edges: .top)
-        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: scope)
-        .animation(.spring(response: 0.35, dampingFraction: 0.9), value: section)
+    }
+
+    /// The iPad layout: the trip as a sheet on the left, its days on the right.
+    ///
+    /// Not the phone screen with a column taken off it. On a phone the banner
+    /// is a photograph the plan scrolls past; here there's room for the trip
+    /// to be *described* — its picture, its dates, who's on it, what's settled
+    /// — in a panel that stays put while the plan moves beside it. The plan
+    /// itself changes shape too: a week of bookings on one continuous rail is
+    /// a very long scroll on a very wide screen, so days become cards that
+    /// open and close, and the whole trip fits on one screen as an overview.
+    ///
+    /// The money floats over the foot of the plan, because it's what every
+    /// booking above it is moving and it shouldn't scroll out of sight.
+    private func splitContent(for trip: Trip) -> some View {
+        HStack(spacing: 0) {
+            tripSheet(for: trip)
+                .frame(width: pane.railWidth + 72)
+
+            plan(for: trip)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func sectionBody(for trip: Trip, showsScope: Bool) -> some View {
+        switch section {
+        case .timeline:
+            timeline(for: trip, showsScope: showsScope)
+                .transition(.opacity)
+
+        case .ledger:
+            ledger(for: trip)
+        }
+    }
+
+    private func ledger(for trip: Trip) -> some View {
+        TripLedger(
+            trip: trip,
+            onOpen: { viewingItem = $0 },
+            onReviewDeparture: { reviewingDeparture = $0 },
+            onOpenStatement: { viewingStatement = $0 }
+        )
+        .transition(.opacity)
+    }
+
+    // MARK: - Trip sheet
+
+    /// Everything the trip *is*, as a panel running the full height of the
+    /// window: photograph, name and dates, four figures, then the small print.
+    ///
+    /// Scrollable in its own right: on a short landscape iPad it runs a little
+    /// past the window, and a panel that can't reach its last row is worse
+    /// than one that moves.
+    private func tripSheet(for trip: Trip) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                sheetCover(for: trip)
+
+                sheetIdentity(for: trip)
+                    .padding(.top, 18)
+
+                sheetFacts(for: trip)
+                    .padding(.top, 18)
+
+                sheetSummary(for: trip)
+                    .padding(.top, 28)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 32)
+        }
+        // A bar rather than a row in the scroll: the buttons stay put, and the
+        // system's soft scroll edge effect blurs the panel out underneath them.
+        .safeAreaBar(edge: .top) {
+            sheetActions(for: trip)
+                .padding(.horizontal, 20)
+                .padding(.top, windowTopInset)
+                .padding(.bottom, 6)
+        }
+        // The top tab bar adds its height to the safe area of everything under
+        // it, but it floats over the plan column, not this one. Clearing only
+        // the status bar puts the back button on the same line as the tabs
+        // instead of a tab bar's height below them.
+        .ignoresSafeArea(.container, edges: .top)
+        .scrollIndicators(.hidden)
+        .scrollEdgeEffectStyle(.soft, for: .top)
+        .background { sheetBackground(for: trip) }
+        .task(id: trip.cover?.url) {
+            guard let cover = trip.cover else { return }
+            let tint = await CoverTint.shared.tint(for: cover)
+            withAnimation(.easeInOut(duration: 0.5)) { coverTint = tint }
+        }
+    }
+
+    /// The window's own top inset — the status bar — without the tab bar's
+    /// share that the view's safe area includes.
+    private var windowTopInset: CGFloat {
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)
+        return window?.safeAreaInsets.top ?? 24
+    }
+
+    /// The photograph, dissolved into the sheet it sits on.
+    ///
+    /// The top of the panel is the cover itself, blurred past recognition so
+    /// only its light and colour survive; below that a wash of the photo's
+    /// average colour fades down into the canvas. The sheet ends up looking
+    /// like it belongs to *this* trip — dusk purple for Paris, glacier blue
+    /// for a trek — without any of the detail that would fight the type.
+    private func sheetBackground(for trip: Trip) -> some View {
+        let tint = coverTint ?? trip.tint
+
+        return ZStack(alignment: .top) {
+            AppTheme.canvasTop
+
+            LinearGradient(
+                stops: [
+                    .init(color: tint.opacity(0.55), location: 0),
+                    .init(color: tint.opacity(0.28), location: 0.45),
+                    .init(color: tint.opacity(0.08), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            DestinationImage(
+                query: trip.destination,
+                photo: trip.cover,
+                fallbackSymbol: trip.symbol,
+                fallbackTint: trip.tint
+            )
+            .frame(height: 520)
+            .frame(maxWidth: .infinity)
+            .blur(radius: 70, opaque: true)
+            .saturation(1.3)
+            .opacity(0.6)
+            .mask {
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+            }
+            .clipped()
+
+            // A soft lift of white so dark ink stays legible on any photo.
+            LinearGradient(
+                colors: [.white.opacity(0.18), .white.opacity(0.42)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(AppTheme.cardStroke.opacity(0.08))
+                .frame(width: 1)
+        }
+        .ignoresSafeArea()
+    }
+
+    /// Back on the left, what you can do to the trip on the right. Adding a
+    /// booking isn't here — it's the cost bar's button, next to the figure it
+    /// changes.
+    private func sheetActions(for trip: Trip) -> some View {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                CircleGlyphButton(symbol: "chevron.left", size: 44) { dismiss() }
+                    .accessibilityLabel("Back to trips")
+
+                Spacer(minLength: 0)
+
+                CircleGlyphButton(symbol: "person.badge.plus", size: 44) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showShare = true
+                }
+                .accessibilityLabel("Invite people")
+
+                if trip.youAreOrganiser {
+                    CircleGlyphButton(symbol: "slider.horizontal.3", size: 44) {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showEditor = true
+                    }
+                    .accessibilityLabel("Edit trip")
+                }
+            }
+        }
+    }
+
+    /// The photograph on its own, no type over it. With a panel to put the
+    /// name in there's nothing it has to be blurred for.
+    private func sheetCover(for trip: Trip) -> some View {
+        DestinationImage(
+            query: trip.destination,
+            photo: trip.cover,
+            fallbackSymbol: trip.symbol,
+            fallbackTint: trip.tint,
+            onResolve: { store.setCover($0, for: trip.id) }
+        )
+        .frame(height: pane.railWidth * 0.6)
+        .frame(maxWidth: .infinity)
+        .clipShape(.rect(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(.white.opacity(0.35))
+        }
+        .shadow(color: (coverTint ?? trip.tint).opacity(0.35), radius: 22, y: 12)
+    }
+
+    private func sheetIdentity(for trip: Trip) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(trip.title)
+                .font(AppTheme.display(28))
+                .foregroundStyle(AppTheme.ink)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+
+            Label(trip.destination.isEmpty ? "Destination not set" : trip.destination, systemImage: "mappin.and.ellipse")
+                .font(.system(size: 14))
+                .foregroundStyle(AppTheme.inkSecondary)
+                .lineLimit(1)
+
+            Label(
+                "\(DateFormatter.cached("EEE, d MMM").string(from: trip.startDate)) – \(DateFormatter.cached("EEE, d MMM").string(from: trip.endDate))",
+                systemImage: "calendar"
+            )
+            .font(.system(size: 14))
+            .foregroundStyle(AppTheme.inkSecondary)
+            .lineLimit(1)
+        }
+        .labelStyle(SheetLabelStyle())
+    }
+
+    private func sheetFacts(for trip: Trip) -> some View {
+        let columns = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+        let timing = sheetTiming(for: trip)
+
+        return LazyVGrid(columns: columns, spacing: 10) {
+            TripFactTile(symbol: "clock", label: "Duration", value: trip.dayCount.pluralised("day"))
+
+            TripFactTile(
+                symbol: "person.2",
+                label: "Travellers",
+                value: "\(trip.travellers.count)",
+                accessory: AnyView(
+                    AvatarStack(travellers: trip.travellers, size: 22, max: 3, departedIDs: trip.departedIDs)
+                ),
+                action: { showTravellers = true }
+            )
+
+            TripFactTile(symbol: "ticket", label: "Bookings", value: "\(trip.items.count)")
+
+            TripFactTile(symbol: timing.symbol, label: timing.label, value: timing.value)
+        }
+    }
+
+    /// The fourth tile changes its question with the trip: how long until it
+    /// starts, how far through it you are, or how long ago it ended.
+    private func sheetTiming(for trip: Trip) -> (symbol: String, label: String, value: String) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        switch trip.phase {
+        case .upcoming:
+            let days = calendar.dateComponents([.day], from: today, to: calendar.startOfDay(for: trip.startDate)).day ?? 0
+            return ("hourglass", "Starts in", days == 1 ? "Tomorrow" : days.pluralised("day"))
+        case .live:
+            return ("figure.walk", "Right now", trip.progressLabel)
+        case .past:
+            let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: trip.endDate), to: today).day ?? 0
+            return ("checkmark.seal", "Ended", "\(days.pluralised("day")) ago")
+        }
+    }
+
+    private func sheetSummary(for trip: Trip) -> some View {
+        let paid = trip.items.filter { $0.paidByID != nil }.reduce(0) { $0 + $1.cost }
+        let unpaid = trip.items.filter { $0.paidByID == nil && $0.cost > 0 }.count
+        let organisers = trip.organisers.map { $0.id == Traveller.you.id ? "You" : $0.name }
+
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Trip details")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(AppTheme.ink)
+                .padding(.bottom, 2)
+
+            TripSummaryRow(
+                symbol: "star",
+                label: "Organised by",
+                value: organisers.isEmpty ? "—" : organisers.joined(separator: ", ")
+            )
+            TripSummaryRow(
+                symbol: "checkmark.circle",
+                label: "Paid so far",
+                value: Money.format(paid, code: trip.currencyCode)
+            )
+            TripSummaryRow(
+                symbol: "exclamationmark.circle",
+                label: "Awaiting a payer",
+                value: unpaid == 0 ? "None" : unpaid.pluralised("booking"),
+                valueTint: unpaid == 0 ? AppTheme.ink : Palette.amberDeep
+            )
+            TripSummaryRow(symbol: "banknote", label: "Currency", value: trip.currencyCode)
+            TripSummaryRow(symbol: "number", label: "Invite code", value: Trip.formatCode(trip.inviteCode))
+        }
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 22, style: .continuous))
+    }
+
+    // MARK: - Plan
+
+    /// The right-hand column: a heading, the section tabs, and either the days
+    /// or the ledger, with the cost bar floating over the bottom of both.
+    private func plan(for trip: Trip) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                planHeader(for: trip)
+                    .padding(.horizontal, 20)
+
+                Group {
+                    switch section {
+                    case .timeline:
+                        timeline(for: trip, showsScope: false)
+                            .transition(.opacity)
+                    case .ledger:
+                        ledger(for: trip)
+                    }
+                }
+                .padding(.top, 8)
+
+                // Clears the floating cost bar, so the last day can scroll
+                // fully above it rather than finishing underneath.
+                Color.clear.frame(height: 104)
+            }
+            .padding(.horizontal, max(0, pane.gutter - 20))
+            .padding(.top, 12)
+        }
+        .scrollIndicators(.hidden)
+        .overlay(alignment: .bottom) {
+            TripCostBar(
+                trip: trip,
+                actionTitle: trip.youAreOrganiser ? "Add booking" : "Invite people",
+                actionSymbol: trip.youAreOrganiser ? "plus" : "person.badge.plus",
+                action: {
+                    if trip.youAreOrganiser { beginAdding() } else { showShare = true }
+                }
+            )
+            .padding(.horizontal, pane.gutter)
+            .padding(.bottom, 14)
+        }
+    }
+
+    private func planHeader(for trip: Trip) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("\(trip.title) · \(trip.dayCount)-day plan")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(AppTheme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            HStack(spacing: 8) {
+                PillTab(value: Section.timeline, title: "Itinerary", selection: $section, namespace: pillSpace)
+                PillTab(value: Section.ledger, title: "Ledger", selection: $section, namespace: pillSpace)
+
+                Spacer(minLength: 12)
+
+                if section == .timeline {
+                    let mine = trip.items.filter { isYours($0, in: trip) }.count
+
+                    scopeChip(.group, "Everyone", trip.items.count)
+                    scopeChip(.mine, "Just you", mine)
+
+                }
+            }
+        }
     }
 
     // MARK: - Timeline
 
     @ViewBuilder
-    private func timeline(for trip: Trip) -> some View {
-        scopeFilter(for: trip)
+    private func timeline(for trip: Trip, showsScope: Bool) -> some View {
+        if showsScope { scopeFilter(for: trip) }
 
         let days = visibleDays(of: trip)
 
@@ -236,17 +676,45 @@ struct TripItineraryView: View {
             noBookings(for: trip)
         } else {
             ForEach(days) { day in
-                DayHeader(day: day)
+                DayHeader(day: day, isCollapsed: collapsedDays.contains(day.id)) {
+                    withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
+                        if collapsedDays.contains(day.id) {
+                            collapsedDays.remove(day.id)
+                        } else {
+                            collapsedDays.insert(day.id)
+                        }
+                    }
+                }
 
-                ForEach(Array(day.items.enumerated()), id: \.element.id) { index, item in
-                    let row = TimelineRow(
-                        item: item,
-                        trip: trip,
-                        isLast: index == day.items.count - 1 && day.id == days.last?.id
-                    )
+                if !collapsedDays.contains(day.id) {
+                    ForEach(Array(day.items.enumerated()), id: \.element.id) { index, item in
+                        let isLastOfDay = index == day.items.count - 1
+                        let row = TimelineRow(
+                            item: item,
+                            trip: trip,
+                            isLast: isLastOfDay && day.id == days.last?.id,
+                            closesDay: isLastOfDay
+                        )
 
-                    Button { viewingItem = item } label: { row }
-                        .buttonStyle(PressableButtonStyle())
+                        Button { viewingItem = item } label: { row }
+                            .buttonStyle(PressableButtonStyle())
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+
+                    // After the day's bookings, because that's when it
+                    // happened — somebody's last day includes everything on
+                    // it. Only in the group view: "just you" is a filter on
+                    // your own bookings, and other people's comings and goings
+                    // aren't part of that question.
+                    if scope == .group {
+                        let leaving = trip.departures(on: day.date)
+                            .compactMap { trip.traveller($0.travellerID) }
+
+                        if !leaving.isEmpty {
+                            DepartureMarker(travellers: leaving, isLast: day.id == days.last?.id)
+                                .transition(.opacity)
+                        }
+                    }
                 }
             }
         }
@@ -269,7 +737,7 @@ struct TripItineraryView: View {
     /// colour of the place survives, and small white type has nothing
     /// fine-grained left to fight.
     private func banner(for trip: Trip) -> some View {
-        let height: CGFloat = 268
+        let height: CGFloat = 320
 
         return GeometryReader { proxy in
             let minY = proxy.frame(in: .scrollView(axis: .vertical)).minY
@@ -325,7 +793,7 @@ struct TripItineraryView: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     showTravellers = true
                 } label: {
-                    AvatarStack(travellers: trip.travellers, size: 24, max: 4)
+                    AvatarStack(travellers: trip.travellers, size: 24, max: 4, departedIDs: trip.departedIDs)
                         .contentShape(.rect)
                 }
                 .buttonStyle(PressableButtonStyle())
@@ -346,6 +814,7 @@ struct TripItineraryView: View {
                 Rectangle()
                     .fill(.white.opacity(0.22))
                     .frame(width: 1, height: 26)
+                    .padding(.horizontal, 14)
 
                 bannerFigure(
                     value: Money.format(trip.yourShare.rounded(), code: trip.currencyCode),
@@ -356,6 +825,11 @@ struct TripItineraryView: View {
         }
         .shadow(color: .black.opacity(0.3), radius: 8, y: 2)
         .padding(.horizontal, 20)
+        // The photograph runs to the edges of the screen; the type on it lines
+        // up with the timeline underneath instead, so the trip's name and the
+        // first booking share a left margin rather than missing it by 27pt.
+        // A no-op on a phone, where the page has no measure to line up with.
+        .pageWidth()
         .padding(.bottom, 16)
     }
 
@@ -446,6 +920,7 @@ struct TripItineraryView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 44)
         .padding(.horizontal, 34)
+        .readableWidth()
     }
 
     private var emptyState: some View {
@@ -462,6 +937,7 @@ struct TripItineraryView: View {
                 .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 40)
+        .readableWidth()
     }
 
     // MARK: - Top bar
@@ -484,7 +960,8 @@ struct TripItineraryView: View {
                 actionCluster
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, pane.gutter)
+        .pageWidth()
         .padding(.top, 4)
         .padding(.bottom, 8)
     }
@@ -587,6 +1064,19 @@ struct TripItineraryView: View {
     private func isYours(_ item: ItineraryItem, in trip: Trip) -> Bool {
         // An item with nobody named is a whole-group cost, so it's yours too.
         item.participantIDs.isEmpty || item.participantIDs.contains(Traveller.you.id)
+    }
+}
+
+/// Icon and text with a fixed-width icon column, so the lines under the trip
+/// name start their words on the same left edge.
+private struct SheetLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 8) {
+            configuration.icon
+                .font(.system(size: 13, weight: .medium))
+                .frame(width: 18)
+            configuration.title
+        }
     }
 }
 

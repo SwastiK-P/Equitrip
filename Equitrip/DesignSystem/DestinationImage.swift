@@ -24,28 +24,40 @@ struct DestinationImage: View {
 
     private var active: TripPhoto? { photo ?? resolved }
 
+    /// Everything is drawn as an *overlay* on a `Color.clear` that takes
+    /// whatever size it is offered, rather than as a `ZStack` the photograph
+    /// is a member of.
+    ///
+    /// A fill-scaled resizable image reports the size it had to grow to in
+    /// order to cover the proposal, which for a tall, narrow frame — a 360pt
+    /// cover in a 348pt-wide rail — is far wider than the frame asked for. In
+    /// a stack that size becomes the stack's size and then the card's, and the
+    /// column it lives in ends up laid out around a number nobody chose;
+    /// `.clipped()` doesn't help, because clipping is about drawing and this
+    /// is about layout. An overlay can't report anything back to its parent,
+    /// so the frame the caller asked for is the frame that happens.
     var body: some View {
-        ZStack {
-            fallback
-
-            if let active {
-                AsyncImage(url: active.url, transaction: Transaction(animation: .easeOut(duration: 0.35))) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .transition(.opacity)
-                    default:
-                        // Keep the fallback showing rather than flashing a
-                        // grey box between request and first byte.
-                        Color.clear
+        Color.clear
+            .overlay { fallback }
+            .overlay {
+                if let active {
+                    AsyncImage(url: active.url, transaction: Transaction(animation: .easeOut(duration: 0.35))) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .transition(.opacity)
+                        default:
+                            // Keep the fallback showing rather than flashing a
+                            // grey box between request and first byte.
+                            Color.clear
+                        }
                     }
                 }
             }
-        }
-        .clipped()
-        .task(id: query) { await load() }
+            .clipped()
+            .task(id: query) { await load() }
     }
 
     private var fallback: some View {

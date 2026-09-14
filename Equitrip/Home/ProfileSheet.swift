@@ -30,7 +30,12 @@ struct ProfileSheet: View {
 
     @State private var showPaymentMethods = false
     @State private var showCurrency = false
+    @State private var showUPISettings = false
     @State private var showNotificationSettings = false
+    @State private var showGmailSettings = false
+    /// Observed so the row's value line follows a connection made inside the
+    /// sub-sheet without the profile screen being re-presented.
+    @State private var gmail = GmailAccount.shared
     @State private var exported: ExportedFile?
     @State private var exportFailed = false
 
@@ -40,8 +45,14 @@ struct ProfileSheet: View {
     /// redraw against.
     @State private var currency = AppSettings.defaultCurrency
     @State private var method = AppSettings.defaultPaymentMethod
+    @State private var upiID = AppSettings.upiID
     /// Bumped whenever a notification channel is toggled, for the same reason.
     @State private var channelVersion = 0
+    @State private var shakeToAdd = AppSettings.shakeToAddExpense
+    /// Whether the "hint reset" confirmation is showing — see
+    /// `resetShakeHint`. Not persisted; it only ever needs to be on screen
+    /// for the couple of seconds after the long press that triggered it.
+    @State private var shakeHintWasReset = false
 
     private var displayName: String {
         guard let userName, !userName.isEmpty else { return "Traveller" }
@@ -57,7 +68,6 @@ struct ProfileSheet: View {
         ScrollView {
             VStack(spacing: 22) {
                 identity
-                stats
                 settings
                 signOut
                 colophon
@@ -80,8 +90,14 @@ struct ProfileSheet: View {
         .sheet(isPresented: $showCurrency) {
             CurrencyPickerSheet(selection: $currency)
         }
+        .sheet(isPresented: $showUPISettings) {
+            UPIIDSettingsSheet(upiID: $upiID)
+        }
         .sheet(isPresented: $showNotificationSettings) {
             NotificationSettingsSheet(version: $channelVersion)
+        }
+        .sheet(isPresented: $showGmailSettings) {
+            GmailSettingsSheet()
         }
         .sheet(item: $exported) { file in
             ShareSheet(items: [file.url])
@@ -93,6 +109,22 @@ struct ProfileSheet: View {
         }
         .onChange(of: currency) { _, new in AppSettings.defaultCurrency = new }
         .onChange(of: method) { _, new in AppSettings.defaultPaymentMethod = new }
+        .onChange(of: shakeToAdd) { _, new in AppSettings.shakeToAddExpense = new }
+        .onChange(of: upiID) { _, new in
+            AppSettings.upiID = new
+            Task { try? await SupabaseRepository.shared.updateUPIID(new) }
+        }
+        .task {
+            // Only fills in a blank field — a reinstall or second device
+            // that's never saved one locally. Never overwrites what's
+            // already showing, or a resolve that's still in flight when the
+            // user edits and saves would win the race and stomp it back.
+            guard upiID.isEmpty else { return }
+            _ = try? await SupabaseRepository.shared.resolveProfile()
+            if upiID.isEmpty, let synced = CurrentUser.traveller.upiVPA {
+                upiID = synced
+            }
+        }
     }
 
     // MARK: - Header
@@ -121,7 +153,7 @@ struct ProfileSheet: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 showAvatarPicker = true
             } label: {
-                MemojiAvatar(traveller: .you, size: 88)
+                TravellerAvatar(traveller: .you, size: 88)
                     .id(avatarVersion)
                     .overlay(alignment: .bottomTrailing) {
                         Image(systemName: "camera.fill")
@@ -153,73 +185,91 @@ struct ProfileSheet: View {
         .cardSurface(corner: 26)
     }
 
-    // MARK: - Stats
-
-    /// Read off the ledger rather than typed in. These were three invented
-    /// figures — a trip count and two amounts that belonged to no trip anybody
-    /// was on — sitting under the user's own name, which is the last place in
-    /// the app that should be showing made-up money.
-    private var stats: some View {
-        HStack(spacing: 0) {
-            stat(value: "\(store.trips.count)", label: store.trips.count == 1 ? "Trip" : "Trips")
-            Divider().frame(height: 34).overlay(AppTheme.cardStroke.opacity(0.10))
-            stat(value: Money.format(store.owedToYou, code: store.primaryCurrency), label: "Owed to you")
-            Divider().frame(height: 34).overlay(AppTheme.cardStroke.opacity(0.10))
-            stat(value: Money.format(store.youOwe, code: store.primaryCurrency), label: "You owe")
-        }
-        .padding(.vertical, 16)
-        .cardSurface(corner: 22)
-    }
-
-    private func stat(value: String, label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundStyle(AppTheme.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(AppTheme.inkTertiary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
+    
     // MARK: - Settings
 
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 11, weight: .bold))
+            .tracking(0.9)
+            .foregroundStyle(AppTheme.inkTertiary)
+            .padding(.leading, 6)
+    }
+
     private var settings: some View {
-        VStack(spacing: 0) {
-            settingsRow(
-                symbol: "creditcard",
-                title: "Payment methods",
-                value: method.label
-            ) { showPaymentMethods = true }
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader("Preferences")
 
-            Hairline(inset: 16)
+            VStack(spacing: 0) {
+                settingsRow(
+                    symbol: "creditcard",
+                    title: "Payment methods",
+                    value: method.label
+                ) { showPaymentMethods = true }
 
-            settingsRow(
-                symbol: "banknote",
-                title: "Default currency",
-                value: "\(Money.symbol(for: currency)) \(currency)"
-            ) { showCurrency = true }
+                Hairline(inset: 16)
 
-            Hairline(inset: 16)
+                settingsRow(
+                    symbol: "banknote",
+                    title: "Default currency",
+                    value: "\(Money.symbol(for: currency)) \(currency)"
+                ) { showCurrency = true }
 
-            settingsRow(
-                symbol: "bell",
-                title: "Notifications",
-                value: notificationSummary
-            ) { showNotificationSettings = true }
+                Hairline(inset: 16)
 
-            Hairline(inset: 16)
+                settingsRow(
+                    symbol: "indianrupeesign.circle",
+                    title: "UPI ID",
+                    value: upiID.isEmpty ? "Not set" : upiID
+                ) { showUPISettings = true }
 
-            settingsRow(
-                symbol: "square.and.arrow.up",
-                title: "Export trip ledger",
-                value: store.trips.isEmpty ? "No trips" : "\(store.trips.count) CSV"
-            ) { exportLedger() }
+                Hairline(inset: 16)
+
+                settingsRow(
+                    symbol: "bell",
+                    title: "Notifications",
+                    value: notificationSummary
+                ) { showNotificationSettings = true }
+
+                Hairline(inset: 16)
+
+                settingsRow(
+                    symbol: "square.and.arrow.up",
+                    title: "Export trip ledger",
+                    value: store.trips.isEmpty ? "No trips" : "\(store.trips.count) CSV"
+                ) { exportLedger() }
+
+                Hairline(inset: 16)
+
+                toggleRow(
+                    symbol: "iphone.gen3.radiowaves.left.and.right",
+                    title: "Shake for quick expense",
+                    isOn: $shakeToAdd,
+                    onLongPress: resetShakeHint
+                )
+            }
+            .cardSurface(corner: 22)
+
+            // Undocumented on purpose — the explainer only ever shows itself
+            // once by design, and this exists so that "once" doesn't mean
+            // "once per install" while building or testing the feature. A
+            // long press is discoverable enough for that without turning it
+            // into an actual settings row nobody else needs.
+            if shakeHintWasReset {
+                Text("Hint reset — the next shake will explain it again")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.leading, 6)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            sectionHeader("Integrations")
+
+            VStack(spacing: 0) {
+                gmailRow
+            }
+            .cardSurface(corner: 22)
         }
-        .cardSurface(corner: 22)
     }
 
     private var notificationSummary: String {
@@ -230,6 +280,55 @@ struct ProfileSheet: View {
         if off == 0 { return "All on" }
         if off == NotificationChannel.allCases.count { return "All off" }
         return "\(NotificationChannel.allCases.count - off) of \(NotificationChannel.allCases.count)"
+    }
+
+    /// The one row that doesn't take an `IconTile`.
+    ///
+    /// Google's mark rather than an SF Symbol envelope, because this row is
+    /// about somebody's Gmail account specifically and a generic glyph would
+    /// under-state what it opens. Same geometry as the rest of the list, so it
+    /// reads as one of them and not as an advert.
+    private var gmailRow: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showGmailSettings = true
+        } label: {
+            HStack(spacing: 12) {
+                GmailMark()
+                    .frame(width: 20, height: 15)
+                    .frame(width: 32, height: 32)
+                    .background(AppTheme.card, in: .rect(cornerRadius: 10, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(AppTheme.cardStroke.opacity(0.1))
+                    }
+
+                Text("Gmail")
+                    .font(.system(size: 15))
+                    .foregroundStyle(AppTheme.ink)
+
+                Spacer(minLength: 6)
+
+                Text(gmailSummary)
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(AppTheme.inkTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppTheme.inkTertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .contentShape(.rect)
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+
+    private var gmailSummary: String {
+        guard gmail.isConnected else { return "Connect" }
+        return gmail.isEnabled ? (gmail.address ?? "Connected") : "Paused"
     }
 
     private func settingsRow(
@@ -269,6 +368,50 @@ struct ProfileSheet: View {
             .contentShape(.rect)
         }
         .buttonStyle(PressableButtonStyle())
+    }
+
+    /// Same geometry as `settingsRow`, but for a preference that's a single
+    /// on/off rather than a value that opens a sub-sheet — a switch instead
+    /// of a chevron, nothing else about the row changes.
+    private func toggleRow(
+        symbol: String,
+        title: String,
+        isOn: Binding<Bool>,
+        onLongPress: (() -> Void)? = nil
+    ) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(spacing: 12) {
+                IconTile(symbol: symbol, size: 32, corner: 10)
+
+                Text(title)
+                    .font(.system(size: 15))
+                    .foregroundStyle(AppTheme.ink)
+            }
+            .contentShape(.rect)
+            // Alongside the toggle's own tap, not instead of it — a long
+            // press still ends in a tap being recognised on release, so this
+            // has to not fight that for the row to keep switching normally.
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5).onEnded { _ in onLongPress?() }
+            )
+        }
+        .tint(AppTheme.accent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+    }
+
+    /// Replays the shake-to-add explainer on the next shake — a long press
+    /// on its row, for testing the feature without reinstalling just to
+    /// clear the "already seen it" flag.
+    private func resetShakeHint() {
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        AppSettings.hasSeenShakeHint = false
+
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { shakeHintWasReset = true }
+        Task {
+            try? await Task.sleep(for: .seconds(2.2))
+            withAnimation(.easeOut(duration: 0.25)) { shakeHintWasReset = false }
+        }
     }
 
     private func exportLedger() {
@@ -368,6 +511,65 @@ private struct PaymentMethodSettingsSheet: View {
     }
 }
 
+// MARK: - UPI ID
+
+/// Your own VPA, so it's typed once here rather than re-typed into every
+/// settlement that happens to be paid your way.
+private struct UPIIDSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var upiID: String
+    @State private var draft: String
+    @FocusState private var focused: Bool
+
+    init(upiID: Binding<String>) {
+        _upiID = upiID
+        _draft = State(initialValue: upiID.wrappedValue)
+    }
+
+    private var trimmed: String { draft.trimmingCharacters(in: .whitespaces) }
+    private var isValid: Bool { trimmed.isEmpty || UPILink.looksValid(trimmed) }
+
+    var body: some View {
+        SettingsSheetScaffold(
+            title: "UPI ID",
+            caption: "Your VPA — the same one your UPI app already shows you."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                GlassField(
+                    label: "Your VPA",
+                    placeholder: "yourname@okhdfcbank",
+                    text: $draft,
+                    symbol: "indianrupeesign.circle",
+                    keyboard: .emailAddress,
+                    autocapitalisation: .never
+                )
+                .focused($focused)
+
+                if !isValid {
+                    Label("Looks like it's missing the @bank part.", systemImage: "exclamationmark.circle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(AppTheme.danger)
+                        .padding(.leading, 2)
+                }
+
+                PrimaryButton(title: "Save", systemImage: "checkmark", isEnabled: isValid) {
+                    upiID = trimmed
+                    GlassToastCenter.shared.show(.init(
+                        symbol: "indianrupeesign.circle.fill",
+                        tint: AppTheme.accent,
+                        title: "UPI ID saved",
+                        subtitle: "People settling up with you will see this.",
+                        duration: .seconds(3)
+                    ))
+                    dismiss()
+                }
+                .padding(.top, 6)
+            }
+        }
+        .onAppear { focused = upiID.isEmpty }
+    }
+}
+
 // MARK: - Notification settings
 
 /// Which events reach you.
@@ -433,7 +635,7 @@ private struct NotificationSettingsSheet: View {
 // MARK: - Scaffold
 
 /// The shape every settings sub-sheet takes: title, one line of why, content.
-private struct SettingsSheetScaffold<Content: View>: View {
+struct SettingsSheetScaffold<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
 
     let title: String

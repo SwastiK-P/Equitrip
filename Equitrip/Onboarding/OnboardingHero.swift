@@ -172,7 +172,7 @@ private struct TripCardView: View {
             HStack(spacing: 10) {
                 HStack(spacing: -11) {
                     ForEach(Array(trip.travellers.enumerated()), id: \.offset) { slot, traveller in
-                        MemojiAvatar(traveller: traveller, size: 36)
+                        TravellerAvatar(traveller: traveller, size: 36)
                             .zIndex(Double(trip.travellers.count - slot))
                     }
                 }

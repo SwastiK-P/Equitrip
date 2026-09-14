@@ -239,22 +239,34 @@ private struct UnsplashSearchView: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             onPick(photo)
         } label: {
-            AsyncImage(url: photo.thumbURL ?? photo.url) { phase in
-                switch phase {
-                case .success(let image): image.resizable().scaledToFill()
-                default: AppTheme.card
+            // Square, tied to the column's own width rather than a fixed
+            // point height — a `.frame(height:)` alone left each tile's
+            // *width* to whatever the image's intrinsic size implied before
+            // the fill frame resolved, so a tile could flash at its native
+            // aspect ratio (a tall sliver, or a doubled-up row) for a beat.
+            // Locking width and height together to the grid cell removes
+            // that degree of freedom entirely.
+            GeometryReader { geo in
+                AsyncImage(url: photo.thumbURL ?? photo.url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    default:
+                        AppTheme.card
+                    }
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+                .clipShape(.rect(cornerRadius: 14, style: .continuous))
+                .overlay(alignment: .bottomLeading) {
+                    Text(photo.photographer)
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .padding(6)
                 }
             }
-            .frame(height: 110)
-            .frame(maxWidth: .infinity)
-            .clipShape(.rect(cornerRadius: 14, style: .continuous))
-            .overlay(alignment: .bottomLeading) {
-                Text(photo.photographer)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
-                    .padding(6)
-            }
+            .aspectRatio(1, contentMode: .fit)
         }
         .buttonStyle(PressableButtonStyle())
     }

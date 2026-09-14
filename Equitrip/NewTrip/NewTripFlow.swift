@@ -14,6 +14,7 @@ import SwiftUI
 /// that check.
 struct NewTripFlow: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.pane) private var pane
 
     var onCreate: (TripDraft) -> Void
     /// Opened straight into joining, e.g. from a scanned link.
@@ -107,6 +108,13 @@ struct NewTripFlow: View {
                         onCreate: {
                             UINotificationFeedbackGenerator().notificationOccurred(.success)
                             onCreate(draft)
+                            GlassToastCenter.shared.show(.init(
+                                symbol: "checkmark.circle.fill",
+                                tint: AppTheme.positive,
+                                title: "Trip created",
+                                subtitle: "\"\(draft.title)\" is ready — start adding bookings.",
+                                duration: .seconds(3.5)
+                            ))
                             dismiss()
                         }
                     )
@@ -118,6 +126,20 @@ struct NewTripFlow: View {
                     removal: .move(edge: .leading).combined(with: .opacity)
                 )
             )
+            // One measure for all six stages rather than six separate caps.
+            //
+            // A wizard is the one shape on iPad that shouldn't grow into the
+            // window: it asks one question at a time, and a question spread
+            // across 1200pt is harder to answer than the same question in a
+            // column — the eye has to travel from a label on one side of the
+            // room to the field it belongs to on the other. Sheets of this
+            // kind are a single centred column in every Apple app that has
+            // one, and for the same reason.
+            // Except the opening fork on a wide iPad, which isn't a question
+            // with a field to answer but a choice between three doors — and
+            // that reads better laid out across the room than stacked in a
+            // column with half the window empty beneath it.
+            .readableWidth(unless: usesWideSource)
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
         .safeAreaBar(edge: .top, spacing: 0) {
@@ -166,10 +188,14 @@ struct NewTripFlow: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, usesWideSource ? pane.gutter : 20)
+        .frame(maxWidth: usesWideSource ? pane.pageWidth : pane.readableWidth)
+        .frame(maxWidth: .infinity)
         .padding(.top, 4)
         .padding(.bottom, 10)
     }
+
+    private var usesWideSource: Bool { stage == .source && pane.isWide }
 
     private func go(_ next: Stage, backwards: Bool = false) {
         withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) {
@@ -220,6 +246,7 @@ private struct TripSourceStage: View {
     let onManual: () -> Void
     let onJoin: () -> Void
 
+    @Environment(\.pane) private var pane
     @State private var appeared = false
 
     private var availability: IntelligenceAvailability {
@@ -227,32 +254,95 @@ private struct TripSourceStage: View {
     }
 
     var body: some View {
+        Group {
+            if pane.isWide {
+                wideBody
+            } else {
+                stackedBody
+            }
+        }
+        .onAppear {
+            withAnimation { appeared = true }
+        }
+    }
+
+    // MARK: iPad
+
+    /// The fork, laid out for a landscape iPad: the question on the left at a
+    /// size that can carry the room, the three answers on the right, and the
+    /// whole thing sitting in the middle of the window rather than hanging off
+    /// the top of it.
+    ///
+    /// The import card keeps its lead — it's the full width of its column and
+    /// twice the height of the other two — so the hierarchy the phone draws
+    /// with a stack is drawn here with size instead.
+    private var wideBody: some View {
+        ScrollView {
+            HStack(alignment: .center, spacing: 56) {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Where are we")
+                            .font(.system(size: 46, weight: .bold, design: .rounded))
+                            .foregroundStyle(AppTheme.ink)
+
+                        Text("going?")
+                            .font(AppTheme.display(52))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+
+                    Text("Bring a booking and let the itinerary build itself, set one up by hand, or hop onto a trip a friend has already planned.")
+                        .font(.system(size: 16))
+                        .foregroundStyle(AppTheme.inkSecondary)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !availability.isReady {
+                        fallbackNote
+                            .padding(.top, 4)
+                    }
+                }
+                .frame(width: 340, alignment: .leading)
+                .staggered(0, appeared)
+
+                VStack(spacing: 16) {
+                    importCard(illustration: 210, scale: 1.35)
+                        .staggered(1, appeared)
+
+                    HStack(spacing: 16) {
+                        manualCard
+                            .staggered(2, appeared)
+                        joinCard
+                            .staggered(3, appeared)
+                    }
+                }
+                .frame(maxWidth: 620)
+            }
+            .padding(.horizontal, pane.gutter)
+            .padding(.vertical, 24)
+            .frame(maxWidth: pane.pageWidth)
+            .frame(maxWidth: .infinity)
+            .containerRelativeFrame(.vertical, alignment: .center) { length, _ in length }
+        }
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    // MARK: Phone
+
+    private var stackedBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 headline
                     .staggered(0, appeared)
 
-                importCard
+                importCard()
                     .staggered(1, appeared)
 
                 HStack(spacing: 12) {
-                    smallCard(
-                        symbol: "square.and.pencil",
-                        title: "From scratch",
-                        detail: "Dates, people, done.",
-                        tint: Palette.greenDeep,
-                        action: onManual
-                    )
-                    .staggered(2, appeared)
-
-                    smallCard(
-                        symbol: "qrcode.viewfinder",
-                        title: "Join a trip",
-                        detail: "Scan or type a code.",
-                        tint: Palette.violetDeep,
-                        action: onJoin
-                    )
-                    .staggered(3, appeared)
+                    manualCard
+                        .staggered(2, appeared)
+                    joinCard
+                        .staggered(3, appeared)
                 }
 
                 if !availability.isReady {
@@ -265,9 +355,26 @@ private struct TripSourceStage: View {
             .padding(.bottom, 40)
         }
         .scrollIndicators(.hidden)
-        .onAppear {
-            withAnimation { appeared = true }
-        }
+    }
+
+    private var manualCard: some View {
+        smallCard(
+            symbol: "square.and.pencil",
+            title: "From scratch",
+            detail: "Dates, people, done.",
+            tint: Palette.greenDeep,
+            action: onManual
+        )
+    }
+
+    private var joinCard: some View {
+        smallCard(
+            symbol: "qrcode.viewfinder",
+            title: "Join a trip",
+            detail: "Scan or type a code.",
+            tint: Palette.violetDeep,
+            action: onJoin
+        )
     }
 
     // MARK: Headline
@@ -290,14 +397,15 @@ private struct TripSourceStage: View {
     /// The lead card. The illustration is the point of it: three booking chips
     /// fanned out of a document, which says what the import actually does in
     /// less space than the sentence underneath it needs.
-    private var importCard: some View {
+    private func importCard(illustration: CGFloat = 132, scale: CGFloat = 1) -> some View {
         Button {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             onImport()
         } label: {
             VStack(alignment: .leading, spacing: 0) {
                 DocumentFan()
-                    .frame(height: 132)
+                    .scaleEffect(scale)
+                    .frame(height: illustration)
                     .frame(maxWidth: .infinity)
 
                 VStack(alignment: .leading, spacing: 4) {

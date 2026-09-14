@@ -41,6 +41,46 @@ enum AppSettings {
         }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: methodKey) }
     }
+
+    // MARK: - UPI
+
+    private static let upiIDKey = "settings.upiID"
+
+    /// Your own VPA, mirrored locally so Settings has something to show
+    /// before the profile round-trips. `profiles.upi_id` on the server is
+    /// the real copy — see `SupabaseRepository.updateUPIID` — since this is
+    /// the one thing worth reading from other people's profiles, not just
+    /// typing once for yourself.
+    static var upiID: String {
+        get { UserDefaults.standard.string(forKey: upiIDKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: upiIDKey) }
+    }
+
+    // MARK: - Shake to add
+
+    private static let shakeToAddExpenseKey = "settings.shakeToAddExpense"
+
+    /// On by default — the fastest way to log a cash spend is one that
+    /// doesn't need you to already be in the app. `RootTabView` reads this
+    /// before acting on a shake; the settings row and the physical gesture
+    /// need nothing more in common than this one flag.
+    static var shakeToAddExpense: Bool {
+        get {
+            guard UserDefaults.standard.object(forKey: shakeToAddExpenseKey) != nil else { return true }
+            return UserDefaults.standard.bool(forKey: shakeToAddExpenseKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: shakeToAddExpenseKey) }
+    }
+
+    private static let hasSeenShakeHintKey = "settings.hasSeenShakeHint"
+
+    /// Whether the one-time "you can shake for this" explainer has already
+    /// shown. It only ever needs to say itself once — every shake after the
+    /// first should just do the thing, not keep re-explaining it.
+    static var hasSeenShakeHint: Bool {
+        get { UserDefaults.standard.bool(forKey: hasSeenShakeHintKey) }
+        set { UserDefaults.standard.set(newValue, forKey: hasSeenShakeHintKey) }
+    }
 }
 
 // MARK: - Ledger export

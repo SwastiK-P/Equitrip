@@ -267,6 +267,51 @@ enum ItineraryReasoner {
             guard seen.insert(key).inserted else { continue }
             result.append(item)
         }
+        return collapseRestatements(result)
+    }
+
+    /// The same booking written down in two different tables.
+    ///
+    /// A document that lists its hotels in one table and then repeats the
+    /// check-in on the day's plan produces two rows for one night — "Tajview
+    /// Agra" and "Hotel check-in Tajview Agra", same clock, only one of them
+    /// priced. The exact-match pass above can't see it, because neither the
+    /// title nor the amount agrees. What does agree is that one name contains
+    /// the other, and that is a weak enough signal to insist the clock matches
+    /// too before acting on it.
+    private static func collapseRestatements(_ items: [PlannedItem]) -> [PlannedItem] {
+        var result: [PlannedItem] = []
+
+        for item in items {
+            let name = normalised(item.title)
+            guard name.count >= 4, !item.clockText.isEmpty else {
+                result.append(item)
+                continue
+            }
+
+            let match = result.firstIndex { existing in
+                guard existing.clockText == item.clockText, existing.kind == item.kind else { return false }
+                let other = normalised(existing.title)
+                guard other.count >= 4 else { return false }
+                return other.contains(name) || name.contains(other)
+            }
+
+            guard let index = match else {
+                result.append(item)
+                continue
+            }
+
+            // Keep whichever reading knew the price, and the shorter name —
+            // the longer one is the shorter one with a category label on it.
+            if item.amount > result[index].amount { result[index].amount = item.amount }
+            if name.count < normalised(result[index].title).count { result[index].title = item.title }
+            if result[index].detail.isEmpty { result[index].detail = item.detail }
+        }
+
         return result
+    }
+
+    private static func normalised(_ title: String) -> String {
+        title.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 }

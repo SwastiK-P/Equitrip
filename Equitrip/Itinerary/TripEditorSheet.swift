@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import PhotosUI
 
 /// Editing a trip after it exists.
 ///
@@ -20,7 +19,7 @@ struct TripEditorSheet: View {
     @State private var showTravellerPicker = false
     @State private var showLocationPicker = false
     @State private var showCurrencyPicker = false
-    @State private var coverItem: PhotosPickerItem?
+    @State private var showImageSource = false
     @State private var confirmingDelete = false
 
     var onSave: (Trip) -> Void
@@ -90,6 +89,30 @@ struct TripEditorSheet: View {
                 draft.cover = nil
             }
         }
+        .sheet(isPresented: $showImageSource) {
+            ImageSourceSheet(
+                suggestedQuery: draft.destination.isEmpty ? draft.title : draft.destination,
+                onPickUnsplash: { photo in
+                    let tripID = draft.id
+                    Task {
+                        let stored = await CoverStore.shared.persist(photo, for: tripID)
+                        draft.cover = stored
+                    }
+                },
+                onPickLibrary: { data in
+                    let tripID = draft.id
+                    Task {
+                        // Stored immediately rather than on save: the picture
+                        // is the one thing on this screen the group sees
+                        // before anything else, and a half-saved cover is
+                        // worse than none.
+                        if let stored = await CoverStore.shared.persist(imageData: data, for: tripID) {
+                            draft.cover = stored
+                        }
+                    }
+                }
+            )
+        }
     }
 
     // MARK: - Chrome
@@ -138,6 +161,12 @@ struct TripEditorSheet: View {
         ) {
             Button("Delete trip", role: .destructive) {
                 onDelete?()
+                GlassToastCenter.shared.show(.init(
+                    symbol: "trash",
+                    tint: AppTheme.danger,
+                    title: "Trip deleted",
+                    subtitle: "\"\(draft.title)\" and everything on it is gone."
+                ))
                 dismiss()
             }
             Button("Keep it", role: .cancel) {}
@@ -161,6 +190,13 @@ struct TripEditorSheet: View {
             draft.title = draft.title.trimmingCharacters(in: .whitespaces)
             draft.destination = draft.destination.trimmingCharacters(in: .whitespaces)
             onSave(draft)
+            GlassToastCenter.shared.show(.init(
+                symbol: "checkmark.circle.fill",
+                tint: AppTheme.positive,
+                title: "Trip updated",
+                subtitle: "\"\(draft.title)\" is saved.",
+                duration: .seconds(3)
+            ))
             dismiss()
         } label: {
             Text("Save changes")
@@ -205,7 +241,10 @@ struct TripEditorSheet: View {
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .topTrailing) {
-            PhotosPicker(selection: $coverItem, matching: .images, photoLibrary: .shared()) {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showImageSource = true
+            } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "photo.on.rectangle.angled")
                         .font(.system(size: 11, weight: .semibold))
@@ -218,20 +257,9 @@ struct TripEditorSheet: View {
                 .background(.black.opacity(0.4), in: .capsule)
                 .padding(10)
             }
+            .buttonStyle(.plain)
         }
         .clipShape(.rect(cornerRadius: 20, style: .continuous))
-        .onChange(of: coverItem) { _, item in
-            guard let item else { return }
-            Task {
-                guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-                // Stored immediately rather than on save: the picture is the
-                // one thing on this screen the group sees before anything
-                // else, and a half-saved cover is worse than none.
-                if let stored = await CoverStore.shared.persist(imageData: data, for: draft.id) {
-                    draft.cover = stored
-                }
-            }
-        }
     }
 
     private var destination: some View {

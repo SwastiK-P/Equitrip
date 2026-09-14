@@ -102,7 +102,7 @@ enum TravellerDirectory {
     }
 
     /// Resolves several addresses at once, keeping the order they were added
-    /// in so the memoji don't reshuffle between screens.
+    /// in so the avatars don't reshuffle between screens.
     static func claimAll(_ emails: [String]) async -> [Traveller] {
         var people: [Traveller] = []
         for email in emails {
@@ -131,15 +131,15 @@ enum TravellerDirectory {
         }
     }
 
-    /// Memoji are assigned from the address so the same person keeps the same
+    /// Avatars are assigned from the address so the same person keeps the same
     /// face across trips and devices, rather than from their position in a
     /// list, which changed every time somebody was removed.
+    ///
+    /// Drawn from the whole pickable set, not the handful of sample
+    /// travellers this used to read: five faces meant a six-person trip was
+    /// guaranteed a collision before anyone had chosen anything.
     private static func suggestedAvatar(for email: String) -> String {
-        let assets = Traveller.all.map(\.asset)
-        let hash = email.unicodeScalars.reduce(into: UInt64(5381)) { total, scalar in
-            total = total &* 33 &+ UInt64(scalar.value)
-        }
-        return assets[Int(hash % UInt64(assets.count))]
+        Traveller.avatars[Int(Traveller.stableHash(email) % UInt64(Traveller.avatars.count))]
     }
 }
 
@@ -153,7 +153,7 @@ private struct DirectoryRow: Decodable {
         let person = Traveller(
             id: id,
             name: display_name,
-            asset: avatar_asset,
+            asset: Traveller.artwork(for: avatar_asset),
             email: email,
             isRegistered: is_registered
         )
