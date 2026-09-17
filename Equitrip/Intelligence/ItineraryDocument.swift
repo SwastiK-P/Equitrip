@@ -33,6 +33,20 @@ struct ItineraryDocument {
         var heading: String
         /// The rows, cleaned of table furniture and totals.
         var lines: [String]
+        /// What the table each row came from was a table of, where the
+        /// document said — aligned with `lines`, empty when it didn't.
+        ///
+        /// Carried beside the text rather than written into it. Folding the
+        /// word "hotel" into the row so the classifier could see it worked,
+        /// and then the model read it as the booking's name and every stay
+        /// came back called "Hotel check-in". A hint the model cannot see is
+        /// a hint it cannot repeat.
+        var hints: [ExtractedKind?] = []
+
+        /// The hint for a row, if there is one.
+        func hint(at index: Int) -> ExtractedKind? {
+            index < hints.count ? hints[index] : nil
+        }
 
         var body: String { lines.joined(separator: "\n") }
 
@@ -80,6 +94,22 @@ struct ItineraryDocument {
     /// produced is one the document actually contains.
     var haystack: String = ""
 
+    /// Which shape the document turned out to be. Recorded because the two
+    /// are read completely differently and a misread is much easier to spot
+    /// when the reading is named.
+    enum Layout {
+        /// "DAY 3 — Montmartre", then rows under it. The narrative kind.
+        case dayHeadings
+        /// No day headings at all: every row carries its own date column, and
+        /// the tables are grouped by category rather than by day. Booking
+        /// confirmations and agent spreadsheets are nearly all this.
+        case datedRows
+        /// Neither. One booking, an email, a page of prose.
+        case flat
+    }
+
+    var layout: Layout = .flat
+
     var isStructured: Bool { days.count >= 2 }
 
     var itemLineCount: Int { days.reduce(0) { $0 + $1.lines.count } }
@@ -100,6 +130,21 @@ struct ItineraryDocument {
         // header; everything after the last day's rows is the appendix.
         let markers = dayMarkers(in: cleaned, referenceDate: referenceDate)
 
+        // A document with fewer than two day headings might still be perfectly
+        // structured — just structured the other way, with the date in a
+        // column instead of over a section. That shape used to collapse into
+        // one undated blob and take the appendix down with it, which is how a
+        // four-day trip with eleven bookings arrived as forty-eight bookings
+        // all happening today.
+        if markers.count < 2, let tabular = tabularParse(cleaned, referenceDate: referenceDate) {
+            document.preamble = tabular.preamble
+            document.days = tabular.days
+            document.appendix = tabular.appendix
+            document.layout = .datedRows
+            document.absorbHeaderFacts(referenceDate: referenceDate)
+            return document
+        }
+
         guard let first = markers.first else {
             // No day headers at all — an email confirmation, a single booking.
             // One section covering everything still beats a flat blob, because
@@ -107,9 +152,30 @@ struct ItineraryDocument {
             let split = splitAppendix(cleaned)
             document.preamble = Array(split.body.prefix(12))
             document.appendix = split.appendix
-            if !split.body.isEmpty {
+
+            // Nothing here has a shape to trust, so the only signal left is
+            // that a booking carries a number — a time, a price, a date, a
+            // reference. A line with none of those is the letter around the
+            // booking: a greeting, a sentence saying it is confirmed, a
+            // sign-off. Each of those used to arrive as a booking of its own.
+            let candidates = split.body.filter { $0.rangeOfCharacter(from: .decimalDigits) != nil }
+            let body = candidates.isEmpty ? split.body : candidates
+
+            if !body.isEmpty {
                 document.days = [
-                    DaySection(number: 1, date: nil, heading: "", lines: cleanRows(split.body))
+                    DaySection(
+                        number: 1,
+                        // One booking still happens on a day, and the date is
+                        // written somewhere in the text even when no line is
+                        // a heading. Reading it beats filing the whole thing
+                        // under today, which is what nil here meant.
+                        date: TravelDate.first(
+                            in: split.body.joined(separator: " "),
+                            referenceDate: referenceDate
+                        ),
+                        heading: "",
+                        lines: cleanRows(body)
+                    )
                 ]
             }
             document.absorbHeaderFacts(referenceDate: referenceDate)
@@ -145,6 +211,7 @@ struct ItineraryDocument {
             )
         }
 
+        document.layout = .dayHeadings
         document.inferMissingDates(referenceDate: referenceDate)
         document.repairOrphanedAmounts()
         document.absorbHeaderFacts(referenceDate: referenceDate)
@@ -245,6 +312,229 @@ struct ItineraryDocument {
         ) != nil
     }
 
+    // MARK: - Tables that date their own rows
+
+    /// What a table of bookings is a table *of*.
+    ///
+    /// Worth knowing because a row only sometimes says what it is. "India Gate
+    /// Guided Tour" names itself; "AI 864" and "The Imperial New Delhi" do not,
+    /// and the heading three lines above them is the only place in the document
+    /// that says flight and hotel. Reading it is the difference between a
+    /// classifier that has something to go on and one that guesses `other`.
+    enum TableKind {
+        case flights, stays, activities, ledger
+
+        /// What a row under this heading is, when nothing in the row itself
+        /// says. An activities table names its own rows, so it offers nothing.
+        var hint: ExtractedKind? {
+            switch self {
+            case .flights: .flight
+            case .stays: .stay
+            case .activities, .ledger: nil
+            }
+        }
+    }
+
+    private static let tableHeadings: [(prefix: String, kind: TableKind)] = [
+        ("flight", .flights), ("air travel", .flights), ("air ticket", .flights),
+        ("accommodation", .stays), ("hotel", .stays), ("stay", .stays),
+        ("lodging", .stays), ("rooms", .stays),
+        ("activit", .activities), ("sightseeing", .activities), ("excursion", .activities),
+        ("tour", .activities), ("transport", .activities), ("transfer", .activities),
+        ("day-by-day", .activities), ("day by day", .activities), ("schedule", .activities),
+        ("itinerary", .activities), ("bookings", .activities),
+        ("expense", .ledger), ("payment record", .ledger), ("payment", .ledger),
+        ("transaction", .ledger), ("ledger", .ledger), ("billing", .ledger),
+        ("invoice", .ledger), ("cost summary", .ledger), ("receipts", .ledger)
+    ]
+
+    /// A short line of words that names the table under it.
+    ///
+    /// It has to carry no date and no price of its own: "Flight Bookings" is a
+    /// heading, "Flight AI 865 13 Sep ₹7,850" is a row that starts with the
+    /// same word.
+    private static func tableHeading(_ line: String) -> TableKind? {
+        guard line.count <= 60, amount(in: line) == nil else { return nil }
+        guard line.rangeOfCharacter(from: .decimalDigits) == nil else { return nil }
+
+        let lower = line
+            .lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: " :—–-"))
+        guard let hit = tableHeadings.first(where: { lower.hasPrefix($0.prefix) }) else { return nil }
+        return hit.kind
+    }
+
+    /// Sentences, footnotes and bullet points, which a well-typeset itinerary
+    /// carries a page of and which look enough like rows to become bookings.
+    private static func looksLikeProse(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let first = trimmed.first else { return true }
+
+        // A bullet or a footnote star is never a booking. Dashes are left out
+        // on purpose: plenty of real itineraries bullet their rows with one.
+        if "•*◦▪·".contains(first) { return true }
+
+        let words = trimmed.components(separatedBy: " ").filter { !$0.isEmpty }
+        if trimmed.hasSuffix("."), words.count > 10 { return true }
+        return words.count > 22
+    }
+
+    /// One row of a table that dates itself, rewritten into the shape the rest
+    /// of this file already reads: a leading clock time, then the booking, then
+    /// its price.
+    ///
+    /// Normalising rather than teaching every downstream step a second format
+    /// is the whole trick here. `isRow`, `cleanRows`, `StructuredRowParser` and
+    /// the model's own prompt all understand a timetable line, and they all
+    /// keep working unchanged on a row that has been turned into one.
+    private static func datedRow(
+        _ line: String,
+        kind: TableKind,
+        referenceDate: Date
+    ) -> (date: Date, minute: Int?, line: String)? {
+        guard !looksLikeProse(line), !isFurniture(line) else { return nil }
+
+        let dates = TravelDate.matches(in: line, referenceDate: referenceDate)
+        guard let first = dates.first else { return nil }
+
+        let clocks = TravelDate.clockMatches(in: line)
+        let money = amount(in: line)
+
+        // A date on its own is a sentence that mentions one. A date sitting
+        // beside a time or a price is a row in a table. That single test is
+        // what keeps "Dates: 10–13 September 2026" out of the bookings.
+        guard !clocks.isEmpty || money != nil else { return nil }
+
+        // Every date and every clock comes out, not just the first: a stay row
+        // carries check-in *and* check-out, and leaving the second pair behind
+        // makes the hotel's name read "The Imperial New Delhi 11 Sep, 11:00".
+        var body = line
+        let cuts = merged(dates.map(\.range) + clocks.map(\.range))
+        for range in cuts.reversed() { body.removeSubrange(range) }
+
+        body = body
+            // The nights count that sits between a hotel's dates and its status.
+            .replacingOccurrences(
+                of: "\\b\\d{1,2}\\s+(?=(?:confirmed|pending|cancelled|refunded|paid|included|complimentary)\\b)",
+                with: "", options: [.regularExpression, .caseInsensitive]
+            )
+            .replacingOccurrences(
+                of: "\\b(?:confirmed|pending|cancelled|refunded|booked)\\b",
+                with: "", options: [.regularExpression, .caseInsensitive]
+            )
+            // Transaction references: unique per row, so they defeat every
+            // duplicate check downstream if they are left on.
+            .replacingOccurrences(
+                of: "\\b(?:txn|ref|pnr|conf)[-–—#: ]?[a-z0-9][a-z0-9-]{3,}\\b",
+                with: "", options: [.regularExpression, .caseInsensitive]
+            )
+            .replacingOccurrences(of: "\\s{2,}", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " ,;:—–-"))
+
+        // The price is lifted off while the rest of the row is rebuilt, then
+        // put back last — everything downstream reads the amount off the end.
+        var amountText = ""
+        if let range = body.range(
+            of: "(?:₹|rs\\.?|inr|\\$|usd|€|eur|£|gbp)\\s*[\\d,]+(?:\\.\\d{1,2})?\\s*$",
+            options: [.regularExpression, .caseInsensitive]
+        ) {
+            amountText = String(body[range]).trimmingCharacters(in: .whitespaces)
+            body.removeSubrange(range)
+        }
+        // Footnote markers ride along on the end of a cell — "New Delhi*" —
+        // and become part of the booking's name if they are left there.
+        body = body.trimmingCharacters(in: CharacterSet(charactersIn: " ,;:—–-*†‡"))
+
+        guard body.filter(\.isLetter).count >= 3 else { return nil }
+
+        // The one word that does go into the text. "Flight" is part of this
+        // booking's name rather than a label on it — "Flight AI 864" is what
+        // a person would write — and it also makes the row match the same
+        // flight written out again on the day's own plan, so the two collapse
+        // into one booking instead of two.
+        if kind == .flights, body.range(of: "flight", options: .caseInsensitive) == nil {
+            body = "Flight \(body)"
+        }
+
+        let minute = clocks.first?.minute
+        var pieces: [String] = []
+        if let minute { pieces.append(String(format: "%02d:%02d", minute / 60, minute % 60)) }
+        pieces.append(body)
+        if !amountText.isEmpty { pieces.append(amountText) }
+
+        return (first.date, minute, pieces.joined(separator: " "))
+    }
+
+    /// Ranges with overlaps dropped and in document order, so cutting them out
+    /// back to front can't corrupt the string.
+    private static func merged(_ ranges: [Range<String.Index>]) -> [Range<String.Index>] {
+        var kept: [Range<String.Index>] = []
+        for range in ranges.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            if let last = kept.last, range.lowerBound < last.upperBound { continue }
+            kept.append(range)
+        }
+        return kept
+    }
+
+    /// Reads the whole document as category tables of self-dating rows.
+    ///
+    /// Returns nil unless that reading actually works — four rows or more
+    /// across two days or more — so a document this isn't simply falls through
+    /// to the day-heading pass rather than being forced into the wrong shape.
+    private static func tabularParse(
+        _ lines: [String],
+        referenceDate: Date
+    ) -> (preamble: [String], days: [DaySection], appendix: [String])? {
+        var kind: TableKind = .activities
+        var seenHeading = false
+        var preamble: [String] = []
+        var appendix: [String] = []
+        var rows: [(date: Date, minute: Int?, line: String, hint: ExtractedKind?)] = []
+
+        for line in lines {
+            if let heading = tableHeading(line) {
+                kind = heading
+                seenHeading = true
+                if heading == .ledger { appendix.append(line) }
+                continue
+            }
+
+            // Everything under a payments heading is a restatement of bookings
+            // listed above it. Read once, not twice.
+            if kind == .ledger {
+                appendix.append(line)
+                continue
+            }
+
+            if let row = datedRow(line, kind: kind, referenceDate: referenceDate) {
+                rows.append((row.date, row.minute, row.line, kind.hint))
+            } else if !seenHeading {
+                preamble.append(line)
+            }
+        }
+
+        let calendar = Calendar.current
+        let distinctDays = Set(rows.map { calendar.startOfDay(for: $0.date) })
+        guard rows.count >= 4, distinctDays.count >= 2 else { return nil }
+
+        let grouped = Dictionary(grouping: rows) { calendar.startOfDay(for: $0.date) }
+        let days = grouped.keys.sorted().enumerated().map { index, day -> DaySection in
+            let ordered = (grouped[day] ?? []).sorted { ($0.minute ?? -1) < ($1.minute ?? -1) }
+            // Not run through `cleanRows`: these rows were each individually
+            // proved to be rows on the way in, so the timetable heuristic that
+            // pass applies has nothing left to decide and could only be wrong.
+            return DaySection(
+                number: index + 1,
+                date: day,
+                heading: "",
+                lines: ordered.map(\.line),
+                hints: ordered.map(\.hint)
+            )
+        }
+
+        return (Array(preamble.prefix(12)), days, appendix)
+    }
+
     // MARK: - Appendix
 
     private static let appendixHeadings = [
@@ -252,7 +542,11 @@ struct ItineraryDocument {
         "ledger-ready structure", "ledger ready structure",
         "terms and conditions", "terms & conditions", "cancellation policy",
         "payment schedule", "inclusions", "exclusions", "what's included",
-        "important information", "booking conditions", "category"
+        "important information", "booking conditions", "category",
+        // A payments table restates bookings that are already listed above it.
+        // Read as items it doubles the trip; read as appendix it costs nothing.
+        "expenses", "expense record", "payment record", "payments",
+        "transactions", "ledger", "billing", "invoice", "receipts"
     ]
 
     private static func splitAppendix(_ lines: [String]) -> (body: [String], appendix: [String]) {
@@ -440,7 +734,16 @@ struct ItineraryDocument {
             guard line.range(of: "^(?:\(labels))\\s*[:\\-]", options: [.regularExpression, .caseInsensitive]) != nil
             else { continue }
 
-            let tail = line.drop { $0 != ":" && $0 != "-" }.dropFirst()
+            var tail = String(line.drop { $0 != ":" && $0 != "-" }.dropFirst())
+            // A header often packs several labels onto one line — "Traveler:
+            // Aarav Mehta Trip: Mumbai → Delhi Dates: 10–13 September". Only
+            // the part before the next label belongs to this one.
+            if let next = tail.range(
+                of: "\\s+\\b(?:trip|tour|dates?|destination|route|package|from|to|booking|ref)\\b\\s*[:\\-]",
+                options: [.regularExpression, .caseInsensitive]
+            ) {
+                tail = String(tail[..<next.lowerBound])
+            }
             // A count where names should be means the document didn't name them.
             guard tail.rangeOfCharacter(from: .letters) != nil else { continue }
 
@@ -507,131 +810,5 @@ struct ItineraryDocument {
                 byAdding: .day, value: index - anchorIndex, to: anchor
             )
         }
-    }
-}
-
-// MARK: - Date reading
-
-/// Dates as travel documents write them, which is every way at once.
-enum TravelDate {
-
-    private static let months = [
-        "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-        "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
-    ]
-
-    /// The first date in a line, or nil. A year that isn't written is taken
-    /// from `referenceDate`, rolling forward — a booking dated "14 March" in
-    /// December is next March, not one that already happened.
-    static func first(in line: String, referenceDate: Date) -> Date? {
-        for form in forms {
-            guard let regex = try? NSRegularExpression(pattern: form.pattern, options: .caseInsensitive)
-            else { continue }
-            let range = NSRange(line.startIndex..., in: line)
-            for match in regex.matches(in: line, range: range) {
-                guard let parts = form.read(match, line) else { continue }
-                if let date = make(parts, referenceDate: referenceDate) { return date }
-            }
-        }
-        return nil
-    }
-
-    private struct Parts {
-        var day: Int
-        var month: Int
-        var year: Int?
-    }
-
-    private struct Form {
-        var pattern: String
-        var read: (NSTextCheckingResult, String) -> Parts?
-    }
-
-    private static let forms: [Form] = [
-        // 2026-09-12
-        Form(pattern: "\\b(\\d{4})-(\\d{2})-(\\d{2})\\b") { match, text in
-            guard let y = match.number(text, 1), let m = match.number(text, 2),
-                  let d = match.number(text, 3) else { return nil }
-            return Parts(day: d, month: m, year: y)
-        },
-        // 12 September 2026 / 12 Sep 2026 / 12th September 2026
-        Form(pattern: "\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+([a-z]{3,9})\\.?,?\\s*(\\d{4})?\\b") { match, text in
-            guard let d = match.number(text, 1), let name = match.string(text, 2),
-                  let m = month(name) else { return nil }
-            return Parts(day: d, month: m, year: match.number(text, 3))
-        },
-        // September 12, 2026 / Sep 12 2026
-        Form(pattern: "\\b([a-z]{3,9})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s*(\\d{4})?\\b") { match, text in
-            guard let name = match.string(text, 1), let m = month(name),
-                  let d = match.number(text, 2) else { return nil }
-            return Parts(day: d, month: m, year: match.number(text, 3))
-        },
-        // 12/09/2026 — day first, which is how everywhere but the US writes it.
-        Form(pattern: "\\b(\\d{1,2})[/.](\\d{1,2})[/.](\\d{2,4})\\b") { match, text in
-            guard let d = match.number(text, 1), let m = match.number(text, 2),
-                  var y = match.number(text, 3) else { return nil }
-            if y < 100 { y += 2000 }
-            return Parts(day: d, month: m, year: y)
-        }
-    ]
-
-    private static func month(_ name: String) -> Int? {
-        months[String(name.prefix(3)).lowercased()]
-    }
-
-    private static func make(_ parts: Parts, referenceDate: Date) -> Date? {
-        guard (1...31).contains(parts.day), (1...12).contains(parts.month) else { return nil }
-
-        let calendar = Calendar.current
-        var components = DateComponents()
-        components.day = parts.day
-        components.month = parts.month
-
-        if let year = parts.year {
-            guard (2000...2100).contains(year) else { return nil }
-            components.year = year
-            return calendar.date(from: components).map { calendar.startOfDay(for: $0) }
-        }
-
-        // No year written. Take this year, and roll forward if that has already
-        // been and gone by more than a couple of months.
-        let thisYear = calendar.component(.year, from: referenceDate)
-        components.year = thisYear
-        guard let candidate = calendar.date(from: components) else { return nil }
-        if candidate < calendar.date(byAdding: .month, value: -2, to: referenceDate)! {
-            components.year = thisYear + 1
-            return calendar.date(from: components).map { calendar.startOfDay(for: $0) }
-        }
-        return calendar.startOfDay(for: candidate)
-    }
-
-    /// "06:30", "6:30 PM", "1830 hrs".
-    static func time(in line: String) -> (hour: Int, minute: Int)? {
-        guard let regex = try? NSRegularExpression(
-            pattern: "\\b(\\d{1,2})[:.](\\d{2})\\s*(am|pm)?\\b", options: .caseInsensitive
-        ) else { return nil }
-        let range = NSRange(line.startIndex..., in: line)
-        guard let match = regex.firstMatch(in: line, range: range),
-              var hour = match.number(line, 1), let minute = match.number(line, 2) else { return nil }
-
-        if let meridiem = match.string(line, 3)?.lowercased() {
-            if meridiem == "pm", hour < 12 { hour += 12 }
-            if meridiem == "am", hour == 12 { hour = 0 }
-        }
-        guard (0...23).contains(hour), (0...59).contains(minute) else { return nil }
-        return (hour, minute)
-    }
-}
-
-// MARK: - Regex helpers
-
-extension NSTextCheckingResult {
-    func string(_ source: String, _ index: Int) -> String? {
-        guard index < numberOfRanges, let range = Range(range(at: index), in: source) else { return nil }
-        return String(source[range])
-    }
-
-    func number(_ source: String, _ index: Int) -> Int? {
-        string(source, index).flatMap { Int($0) }
     }
 }

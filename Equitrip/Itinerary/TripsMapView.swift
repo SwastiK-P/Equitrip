@@ -15,6 +15,7 @@ import MapKit
 struct TripsMapView: View {
     @Environment(\.tripStore) private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.pane) private var pane
 
     @State private var pins: [TripPin] = []
     @State private var selection: UUID?
@@ -39,7 +40,7 @@ struct TripsMapView: View {
 
             topBar
         }
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: pane.isRegular ? .bottomLeading : .bottom) {
             if let selected {
                 TripMapCard(
                     trip: selected.trip,
@@ -51,11 +52,17 @@ struct TripsMapView: View {
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) { selection = nil }
                     }
                 )
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+                .padding(pane.isRegular ? 18 : 0)
             }
         }
+        // Applied to the whole composite, not to the card inside it. The
+        // ZStack still *lays out* within the safe area even though the map
+        // draws past it, so a bottom-aligned overlay anchors to the safe-area
+        // edge — and `ignoresSafeArea` on the card had no room to expand into.
+        // Extending the container is what actually lets the modal reach the
+        // screen edge instead of leaving a strip of map under it.
+        .ignoresSafeArea(edges: .bottom)
         .task { await resolve() }
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: selection)
     }
@@ -111,7 +118,7 @@ struct TripsMapView: View {
                 Button {
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
                         selection = nil
-                        camera = .automatic
+                        fitAll()
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -161,6 +168,46 @@ struct TripsMapView: View {
         }
 
         pins = resolved
+        fitAll()
+    }
+
+    /// Frames every pin at once, with extra breathing room on the left and
+    /// right — `.automatic`'s own fit ran pins right up to the screen edge,
+    /// which crops a trip's cover art badly for anything near the antimeridian
+    /// of the group.
+    private func fitAll() {
+        guard !pins.isEmpty else {
+            camera = .automatic
+            return
+        }
+
+        let lats = pins.map(\.coordinate.latitude)
+        let lons = pins.map(\.coordinate.longitude)
+        guard let minLat = lats.min(), let maxLat = lats.max(),
+              let minLon = lons.min(), let maxLon = lons.max() else {
+            camera = .automatic
+            return
+        }
+
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+
+        // Single-pin trips would otherwise collapse the span to zero, so a
+        // floor keeps that case zoomed out to something sensible.
+        let latSpread = Swift.max(maxLat - minLat, 4)
+        let lonSpread = Swift.max(maxLon - minLon, 4)
+
+        camera = .region(
+            MKCoordinateRegion(
+                center: center,
+                span: MKCoordinateSpan(
+                    latitudeDelta: latSpread * 1.35,
+                    longitudeDelta: lonSpread * 1.9
+                )
+            )
+        )
     }
 
     /// Cached across the session — the same handful of destinations would
@@ -241,111 +288,232 @@ private struct Triangle: Shape {
 
 // MARK: - Detail card
 
-/// Deliberately under half the screen: the map is the point, and a sheet that
-/// swallows it turns this back into a list.
+/// The selected trip, as a glass modal across the foot of the map.
+///
+/// Built as chrome rather than as content, which is what the two attempts
+/// before it got wrong. A floating opaque card reads as a tooltip dropped on
+/// the map; a full-width opaque panel reads as a second screen that has
+/// swallowed the bottom third of the first one. Neither is what this is — it's
+/// a control layer over a map you are still looking at and still panning, and
+/// Liquid Glass is the material the rest of this app's navigation layer is
+/// already made of.
+///
+/// So: edge to edge, so it belongs to the screen instead of hovering inside
+/// it; rounded only along the top, so it reads as having come up from beneath;
+/// and glass, so France is still visible through it and the map never stops
+/// being the thing you're using.
 private struct TripMapCard: View {
+    @Environment(\.pane) private var pane
+
     let trip: Trip
     let onOpen: () -> Void
     let onClose: () -> Void
 
-    var body: some View {
-        VStack(spacing: 0) {
-            cover
+    private let corner: CGFloat = 34
 
-            VStack(spacing: 13) {
-                HStack(spacing: 0) {
-                    cell(value: "\(trip.dayCount)", label: trip.dayCount == 1 ? "day" : "days")
-                    divider
-                    cell(value: "\(trip.bookingCount)", label: trip.bookingCount == 1 ? "booking" : "bookings")
-                    divider
-                    // Nothing to settle until the trip has started — see
-                    // `Trip.showsBalance`.
-                    if trip.showsBalance {
-                        cell(value: trip.netLabel, label: trip.netCaption, tone: trip.netTone)
-                    } else {
-                        cell(value: Money.format(trip.yourShare, code: trip.currencyCode), label: "your share")
-                    }
-                }
+    /// A sheet on a phone, a floating panel on iPad.
+    ///
+    /// The card came up from the bottom edge because on a phone that is the
+    /// only place a second layer can come from. On iPad the map is a room
+    /// rather than a strip, and a 1200pt bar pinned to the floor hides the
+    /// southern third of it to say four things about one trip. Unpinned, it
+    /// becomes what Maps itself uses: a panel in the corner, rounded all
+    /// round, with the map carrying on behind and beside it.
+    private var floats: Bool { pane.isRegular }
 
-                Button(action: onOpen) {
-                    HStack(spacing: 7) {
-                        Text("Open trip")
-                            .font(.system(size: 15.5, weight: .semibold))
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 12.5, weight: .bold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                }
-                .buttonStyle(.glassProminent)
-                .tint(AppTheme.accent)
-            }
-            .padding(16)
-        }
-        .background(AppTheme.card, in: .rect(cornerRadius: 26, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .strokeBorder(AppTheme.cardStroke.opacity(0.06))
-        }
-        .shadow(color: .black.opacity(0.22), radius: 22, y: 10)
+    /// Rounded along the top on a phone, all round when it floats.
+    private var shape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: corner,
+            bottomLeadingRadius: floats ? corner : 0,
+            bottomTrailingRadius: floats ? corner : 0,
+            topTrailingRadius: corner,
+            style: .continuous
+        )
     }
 
-    private var cover: some View {
-        DestinationImage(
-            query: trip.destination,
-            photo: trip.cover,
-            fallbackSymbol: trip.symbol,
-            fallbackTint: trip.tint
-        )
-        .frame(height: 116)
-        .frame(maxWidth: .infinity)
-        .overlay(alignment: .bottom) {
-            LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom)
-                .frame(height: 80)
+    var body: some View {
+        VStack(spacing: 0) {
+            if !floats { grabber }
+            headline
+            facts
+            openButton
         }
-        .overlay(alignment: .bottomLeading) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(trip.title)
-                    .font(.system(size: 19, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("\(trip.dateRange) · \(trip.destination)")
+        .frame(maxWidth: floats ? 380 : .infinity)
+        // A wash of the card colour between the glass and the content. Plain
+        // `.regular` glass over a bright map (a cyan sea, a green coast) let
+        // so much of it through that the small grey type on top had to compete
+        // with whatever happened to be underneath; this mutes the map without
+        // sealing it off, so the panel still refracts and still reads as a
+        // layer over somewhere rather than a card.
+        .background {
+            shape.fill(AppTheme.card.opacity(0.62))
+        }
+        .glassEffect(.regular, in: shape)
+        .overlay(alignment: .topTrailing) { closeButton }
+        .padding(.top, floats ? 18 : 0)
+    }
+
+    /// Not draggable — the map's own pins are how you change selection. It's
+    /// here because a bar across the bottom of a screen with a rounded top and
+    /// no grabber reads as furniture rather than as something dismissible, and
+    /// the close button alone is easy to miss on a busy map.
+    private var grabber: some View {
+        Capsule()
+            .fill(AppTheme.inkTertiary.opacity(0.35))
+            .frame(width: 38, height: 5)
+            .padding(.top, 9)
+            .padding(.bottom, 14)
+    }
+
+    private var headline: some View {
+        HStack(spacing: 14) {
+            DestinationImage(
+                query: trip.destination,
+                photo: trip.cover,
+                fallbackSymbol: trip.symbol,
+                fallbackTint: trip.tint
+            )
+            .frame(width: 68, height: 68)
+            .clipShape(.rect(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.white.opacity(0.45))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(region)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.88))
+                    .foregroundStyle(AppTheme.inkSecondary)
+                    .lineLimit(1)
+
+                Text(trip.title)
+                    .font(AppTheme.display(23))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(trip.phase.tint)
+                        .frame(width: 5, height: 5)
+
+                    Text("\(trip.phase.label) · \(trip.dateRange)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(AppTheme.inkSecondary)
+                        .lineLimit(1)
+                }
             }
-            .lineLimit(1)
-            .shadow(color: .black.opacity(0.4), radius: 6, y: 1)
-            .padding(14)
+
+            Spacer(minLength: 0)
         }
-        .overlay(alignment: .topTrailing) {
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
-                    .background(.black.opacity(0.4), in: .circle)
+        .padding(.horizontal, 20)
+        .padding(.trailing, 30)
+    }
+
+    /// The three things worth knowing before deciding to open it. On glass
+    /// these sit on their own translucent tray rather than floating loose —
+    /// small grey type directly on a blurred map is the one thing glass is bad
+    /// at holding.
+    private var facts: some View {
+        HStack(spacing: 0) {
+            fact(value: "\(trip.dayCount)", label: trip.dayCount == 1 ? "day" : "days")
+
+            divider
+
+            fact(
+                value: "\(trip.bookingCount)",
+                label: trip.bookingCount == 1 ? "booking" : "bookings"
+            )
+
+            divider
+
+            VStack(spacing: 5) {
+                AvatarStack(travellers: trip.travellers, size: 24, max: 4, departedIDs: trip.departedIDs)
+
+                Text("going")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(AppTheme.inkTertiary)
             }
-            .buttonStyle(.plain)
-            .padding(10)
+            .frame(maxWidth: .infinity)
         }
-        .clipShape(.rect(topLeadingRadius: 26, topTrailingRadius: 26))
+        .padding(.vertical, 13)
+        .background(.white.opacity(0.28), in: .rect(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.4))
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
     }
 
     private var divider: some View {
-        Rectangle().fill(AppTheme.cardStroke.opacity(0.10)).frame(width: 1, height: 26)
+        Rectangle()
+            .fill(AppTheme.cardStroke.opacity(0.10))
+            .frame(width: 1, height: 26)
     }
 
-    private func cell(value: String, label: String, tone: Color = AppTheme.ink) -> some View {
+    private func fact(value: String, label: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(tone)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(AppTheme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+
             Text(label)
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(AppTheme.inkTertiary)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var openButton: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 7) {
+                Text("Open trip")
+                    .font(.system(size: 16, weight: .semibold))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .bold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+        }
+        .buttonStyle(.glassProminent)
+        .tint(AppTheme.accent)
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        // Clears the home indicator, since the modal extends beneath it —
+        // which a floating panel doesn't, so it takes a plain card inset.
+        .padding(.bottom, pane.isRegular ? 20 : 30)
+    }
+
+    private var closeButton: some View {
+        Button(action: onClose) {
+            Image(systemName: "xmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(AppTheme.inkSecondary)
+                .frame(width: 30, height: 30)
+                .contentShape(.circle)
+                .glassEffect(.regular.interactive(), in: .circle)
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 16)
+        .padding(.top, 14)
+        .accessibilityLabel("Close")
+    }
+
+    /// "Manali, Himachal Pradesh, India" is a geocoder's answer, not a caption
+    /// — the same trim the Trips list makes.
+    private var region: String {
+        let parts = trip.destination
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        guard let first = parts.first else { return trip.dateRange }
+        guard parts.count > 2, let last = parts.last else { return parts.joined(separator: ", ") }
+        return "\(first), \(last)"
     }
 }

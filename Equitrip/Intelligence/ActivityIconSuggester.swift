@@ -109,6 +109,71 @@ enum ActivityIconSuggester {
         }
     }
 
+    // MARK: - Category
+
+    /// Which category a hastily-typed line belongs in.
+    ///
+    /// Exists for quick add, where there is deliberately no category picker.
+    /// Somebody standing on a beach paying for snacks should type "snacks" and
+    /// be done; making them first classify it as Food is asking them to do the
+    /// filing. The model reads the words and files it, and the guess is only
+    /// ever a default — the booking's category is editable everywhere else.
+    static func kind(for title: String) async -> ItineraryKind {
+        let key = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard key.count >= 3 else { return .activity }
+        if let hit = kindCache[key] { return hit }
+
+        guard isAvailable else { return kindKeywordMatch(key) }
+
+        do {
+            let session = LanguageModelSession(
+                instructions: """
+                    You file travel expenses into one category from a fixed list.
+                    Answer with exactly one word from the list and nothing else.
+                    """
+            )
+
+            let tokens = ItineraryKind.allCases.map(\.rawValue).joined(separator: ", ")
+            let response = try await session.respond(
+                to: "Expense: \"\(title)\"\n\nChoose one of: \(tokens)"
+            )
+
+            let answer = response.content
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .filter { $0.isLetter }
+
+            guard let kind = ItineraryKind(rawValue: answer) else { return kindKeywordMatch(key) }
+            kindCache[key] = kind
+            return kind
+        } catch {
+            return kindKeywordMatch(key)
+        }
+    }
+
+    private static var kindCache: [String: ItineraryKind] = [:]
+
+    /// The offline path. Deliberately biased toward `.activity`: it's the
+    /// catch-all on the timeline and the least wrong place for something the
+    /// matcher doesn't recognise.
+    private static func kindKeywordMatch(_ title: String) -> ItineraryKind {
+        let table: [(ItineraryKind, [String])] = [
+            (.meal, ["breakfast", "lunch", "dinner", "snack", "food", "cafe", "coffee", "drink",
+                     "bar", "restaurant", "meal", "chai", "beer", "wine", "ice cream", "pizza"]),
+            (.stay, ["hotel", "hostel", "villa", "airbnb", "resort", "room", "stay", "lodge", "check-in"]),
+            (.flight, ["flight", "airline", "airport", "boarding"]),
+            (.train, ["train", "rail", "metro", "tram", "irctc"]),
+            (.drive, ["taxi", "cab", "uber", "ola", "transfer", "car", "fuel", "petrol", "toll",
+                      "parking", "rickshaw", "bus", "scooter", "bike rental"]),
+            (.activity, ["ticket", "tour", "museum", "entry", "diving", "trek", "spa", "show", "park"])
+        ]
+
+        for (kind, tokens) in table where tokens.contains(where: { title.contains($0) }) {
+            return kind
+        }
+        return .activity
+    }
+
     /// The no-Apple-Intelligence path: plain substring matching on the same
     /// vocabulary, which handles the obvious cases and declines the rest.
     private static func keywordMatch(_ title: String) -> String? {

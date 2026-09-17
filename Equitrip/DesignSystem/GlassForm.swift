@@ -128,48 +128,6 @@ struct GlassRow<Trailing: View>: View {
     }
 }
 
-// MARK: - Segmented picker
-
-/// Glass segmented control with a sliding selection. Used where the options
-/// are few enough to show at once and the choice changes what's below it.
-struct GlassSegments<Value: Hashable>: View {
-    @Namespace private var namespace
-
-    let options: [(value: Value, label: String)]
-    @Binding var selection: Value
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(options, id: \.value) { option in
-                let isSelected = option.value == selection
-
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
-                        selection = option.value
-                    }
-                } label: {
-                    Text(option.label)
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(isSelected ? AppTheme.ctaLabel : AppTheme.inkSecondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .background {
-                            if isSelected {
-                                Capsule()
-                                    .fill(AppTheme.cta)
-                                    .matchedGeometryEffect(id: "segment", in: namespace)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(4)
-        .panelSurface(corner: 22)
-    }
-}
-
 // MARK: - Chips
 
 /// Removable participant chip.
@@ -179,7 +137,7 @@ struct TravellerChip: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            MemojiAvatar(traveller: traveller, size: 24)
+            TravellerAvatar(traveller: traveller, size: 24)
 
             Text(traveller.name)
                 .font(.system(size: 13.5, weight: .medium))

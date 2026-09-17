@@ -19,11 +19,13 @@ import SwiftUI
 /// cards still reads as a list of different places.
 struct TripListView: View {
     @Environment(\.tripStore) private var store
+    @Environment(\.pane) private var pane
 
     @State private var showNewTrip = false
     @State private var showMap = false
     @State private var editing: Trip?
     @State private var inviting: Trip?
+    @State private var deleting: Trip?
 
     var body: some View {
         ZStack {
@@ -40,7 +42,11 @@ struct TripListView: View {
             }
         }
         .scrollEdgeEffectStyle(.soft, for: .top)
-        .safeAreaBar(edge: .top, spacing: 0) { header }
+        .tabAlignedHeader { header }
+        // The stack's bar is empty — the header above is this screen's chrome
+        // — but left visible it still sits over the top of the window and
+        // swallows taps meant for the buttons that share its line.
+        .toolbar(.hidden, for: .navigationBar)
         .fullScreenCover(isPresented: $showNewTrip) {
             NewTripFlow { draft in store.add(draft.makeTrip()) }
         }
@@ -49,28 +55,61 @@ struct TripListView: View {
                 .environment(\.tripStore, store)
         }
         .sheet(item: $editing) { trip in
-            TripEditorSheet(trip: trip) { store.update($0) }
+            TripEditorSheet(
+                trip: trip,
+                onSave: { store.update($0) },
+                onDelete: trip.youAreOrganiser ? { store.delete(trip.id) } : nil
+            )
         }
         .sheet(item: $inviting) { trip in
             TripInviteSheet(trip: trip)
+        }
+        // The menu's delete asks here rather than in the editor, since it
+        // never opened the editor. Same words either way.
+        .confirmationDialog(
+            deleting.map { "Delete \($0.title)?" } ?? "Delete trip?",
+            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete trip", role: .destructive) {
+                if let trip = deleting {
+                    store.delete(trip.id)
+                    GlassToastCenter.shared.show(.init(
+                        symbol: "trash",
+                        tint: AppTheme.danger,
+                        title: "Trip deleted",
+                        subtitle: "\"\(trip.title)\" and everything on it is gone."
+                    ))
+                }
+                deleting = nil
+            }
+            Button("Keep it", role: .cancel) { deleting = nil }
+        } message: {
+            Text("This removes it for everyone on the trip, along with every booking on it. It can't be undone.")
         }
     }
 
     private var header: some View {
         HStack(alignment: .lastTextBaseline) {
-            Text("Trips")
-                .font(.system(size: 34, weight: .bold))
-                .foregroundStyle(AppTheme.ink)
+            // Not on iPad: the tab bar on the same line already says
+            // "Itinerary" in the middle of it, and a second name for the same
+            // screen beside it reads as a stutter.
+            if !pane.isRegular {
+                Text("Trips")
+                    .font(.system(size: 34, weight: .bold))
+                    .foregroundStyle(AppTheme.ink)
+            }
 
             Spacer(minLength: 8)
 
-            CircleGlyphButton(symbol: "map", size: 38) { showMap = true }
+            CircleGlyphButton(symbol: "map", size: pane.scaled(38, regular: 42)) { showMap = true }
                 .accessibilityLabel("See trips on a map")
 
-            CircleGlyphButton(symbol: "plus", size: 38) { showNewTrip = true }
+            CircleGlyphButton(symbol: "plus", size: pane.scaled(38, regular: 42)) { showNewTrip = true }
                 .accessibilityLabel("New or join a trip")
         }
-        .padding(.horizontal, 20)
+        .gutter()
+        .pageWidth()
         .padding(.top, 4)
         .padding(.bottom, 10)
     }
@@ -84,24 +123,33 @@ struct TripListView: View {
                 Task { await store.reload() }
             }
             .padding(.horizontal, 20)
+            .readableWidth()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var list: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 26) {
+            LazyVStack(alignment: .leading, spacing: pane.spacing(26)) {
                 section("Happening now", trips: store.trips.filter { $0.phase == .live })
                 section("Coming up", trips: store.trips.filter { $0.phase == .upcoming })
                 section("Wrapped up", trips: store.trips.filter { $0.phase == .past })
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, pane.isRegular ? pane.gutter : 16)
+            .pageWidth()
             .padding(.top, 2)
             .padding(.bottom, 28)
         }
         .scrollIndicators(.hidden)
     }
 
+    /// One life-stage of the portfolio.
+    ///
+    /// A column of place cards on a phone, a grid of them on iPad — two across
+    /// in portrait, three on a 13" in landscape. The card was always squarish
+    /// and photo-led, which is the shape that grids well; stacked one per row
+    /// at 1300pt it became a series of billboards you could only see one of at
+    /// a time, which is the opposite of what a portfolio view is for.
     @ViewBuilder
     private func section(_ title: String, trips: [Trip]) -> some View {
         if !trips.isEmpty {
@@ -112,12 +160,13 @@ struct TripListView: View {
                     .foregroundStyle(AppTheme.inkTertiary)
                     .padding(.leading, 6)
 
-                ForEach(trips) { trip in
+                CardGrid(items: trips, columns: pane.tripColumns, spacing: pane.spacing(14)) { trip in
                     TripPlaceCard(
                         trip: trip,
                         onOpen: { store.itineraryPath.append(trip.id) },
                         onEdit: { editing = trip },
-                        onInvite: { inviting = trip }
+                        onInvite: { inviting = trip },
+                        onDelete: { deleting = trip }
                     )
                 }
             }
@@ -143,6 +192,7 @@ struct TripListView: View {
                 .padding(.top, 4)
         }
         .padding(.horizontal, 40)
+        .readableWidth()
     }
 }
 
@@ -156,11 +206,13 @@ struct TripListView: View {
 private struct TripPlaceCard: View {
     @Environment(\.tripStore) private var store
     @Environment(\.tripZoomNamespace) private var zoom
+    @Environment(\.pane) private var pane
 
     let trip: Trip
     var onOpen: () -> Void
     var onEdit: () -> Void
     var onInvite: () -> Void
+    var onDelete: (() -> Void)?
 
     /// The colour of this trip's photograph, once it has been sampled.
     /// `trip.tint` stands in until then — and permanently, for a trip whose
@@ -171,6 +223,19 @@ private struct TripPlaceCard: View {
     private let inset: CGFloat = 8
 
     private var panelTint: Color { mount ?? trip.tint }
+
+    /// Keyed to how many cards share the row rather than to how wide the
+    /// window is — it's the card's own aspect that matters, and a card in a
+    /// two-up grid on an 11" iPad is half again as wide as one in a three-up
+    /// grid on a 13". Held to roughly the phone card's proportions either way,
+    /// so the print never flattens into a letterbox strip.
+    private var coverHeight: CGFloat {
+        switch pane.tripColumns {
+        case 1: 178
+        case 2: 244
+        default: 196
+        }
+    }
 
     var body: some View {
         Button(action: onOpen) {
@@ -275,7 +340,7 @@ private struct TripPlaceCard: View {
             fallbackTint: trip.tint,
             onResolve: { store.setCover($0, for: trip.id) }
         )
-        .frame(height: 178)
+        .frame(height: coverHeight)
         .frame(maxWidth: .infinity)
         .clipShape(.rect(cornerRadius: corner - inset - 2, style: .continuous))
         .overlay {
@@ -292,22 +357,16 @@ private struct TripPlaceCard: View {
     /// quiet as the reference.
     private var footnote: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(trip.phase.tint)
-                    .frame(width: 5, height: 5)
-                Text("\(trip.phase.label) · \(trip.dateRange)")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.black.opacity(0.32), in: .capsule)
-            .background(.ultraThinMaterial, in: .capsule)
+            Text("\(trip.phase.label) · \(trip.dateRange)")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.black)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .glassEffect(.regular.tint(.white.opacity(0.55)), in: .capsule)
 
             Spacer(minLength: 4)
 
-            AvatarStack(travellers: trip.travellers, size: 24, max: 4)
+            AvatarStack(travellers: trip.travellers, size: 24, max: 4, departedIDs: trip.departedIDs)
         }
         .padding(10)
     }
@@ -315,8 +374,31 @@ private struct TripPlaceCard: View {
     private var menu: some View {
         Menu {
             Button("Open trip", systemImage: "arrow.forward") { onOpen() }
-            Button("Edit trip", systemImage: "pencil") { onEdit() }
-            Button("Invite people", systemImage: "person.badge.plus") { onInvite() }
+
+            // Editing is the organiser's, here as everywhere else. This menu
+            // was the one place that offered it to anyone: the trip screen's
+            // toolbar has always hidden its edit control behind
+            // `youAreOrganiser`, and the editor it opens saves unconditionally,
+            // so a traveller could rename or re-date a trip they don't run —
+            // and then be refused by row-level security with no explanation.
+            //
+            // `youAreOrganiser` is also false for somebody who has left, which
+            // is the same rule for the same reason: a trip you've gone home
+            // from isn't yours to re-plan.
+            if trip.youAreOrganiser {
+                Button("Edit trip", systemImage: "pencil") { onEdit() }
+            }
+
+            // Inviting stays open to any traveller — that's deliberate, and
+            // matches the trip screen — but not to somebody who has left.
+            if !trip.hasLeft(Traveller.you.id) {
+                Button("Invite people", systemImage: "person.badge.plus") { onInvite() }
+            }
+
+            if trip.youAreOrganiser, let onDelete {
+                Divider()
+                Button("Delete trip", systemImage: "trash", role: .destructive) { onDelete() }
+            }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .bold))

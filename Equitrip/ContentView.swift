@@ -75,22 +75,9 @@ struct ContentView: View {
         route = destination
     }
 
-    /// "You" only means something once we know who that is on both sides:
-    /// the display name for the UI, and the real `profiles.id` for anything
-    /// that talks to Supabase. Every participant chip, message and
-    /// `is_trip_member` check downstream reads this, so it has to finish
-    /// before Home appears — a chat message sent under the wrong id fails
-    /// its foreign key silently, which is a much worse debugging experience
-    /// than a brief wait here.
+    /// Has to finish before Home appears — see `AuthService.bindIdentity()`.
     private func bindIdentity() async {
-        CurrentUser.adopt(auth.displayName)
-        CurrentUser.adoptEmail(auth.email)
-        if let id = try? await SupabaseRepository.shared.resolveProfile() {
-            CurrentUser.adoptID(id)
-            if let face = SupabaseRepository.shared.currentAvatar {
-                CurrentUser.adoptAvatar(asset: face.asset, url: face.url)
-            }
-        }
+        await auth.bindIdentity()
     }
 }
 

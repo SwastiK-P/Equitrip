@@ -8,15 +8,15 @@ import SwiftUI
 
 /// Choosing the face you show up as.
 ///
-/// Everybody used to be handed a memoji — the same one, `MemojiChris`, for
-/// every account on the device — which made the avatar decoration rather than
-/// identification: four people on a trip, four identical faces. Two ways out
-/// of that, in the order people reach for them: a photograph of yourself, or
-/// one of the memoji if you'd rather not put a photo in a shared ledger.
+/// Everybody used to be handed the same face for every account on the device,
+/// which made the avatar decoration rather than identification: four people
+/// on a trip, four identical faces. Two ways out of that, in the order people
+/// reach for them: a photograph of yourself, or one of the avatars if you'd
+/// rather not put a photo in a shared ledger.
 ///
-/// They're exclusive, not layered. Choosing a photo replaces the memoji
+/// They're exclusive, not layered. Choosing a photo replaces the avatar
 /// rather than sitting in front of it — the grid disappears the moment one is
-/// picked, and the memoji is gone from the saved avatar, not just hidden
+/// picked, and the avatar is gone from the saved face, not just hidden
 /// behind it.
 struct AvatarPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -24,7 +24,7 @@ struct AvatarPickerSheet: View {
     /// Called once the new face is saved, so the presenting screen can redraw.
     var onSaved: () -> Void = {}
 
-    @State private var asset = CurrentUser.traveller.asset
+    @State private var asset = Traveller.artwork(for: CurrentUser.traveller.asset)
     @State private var photoURL = CurrentUser.traveller.avatarURL
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var isWorking = false
@@ -33,7 +33,12 @@ struct AvatarPickerSheet: View {
     /// What the sheet is currently proposing, drawn with the real avatar view
     /// so the preview is the thing itself rather than an approximation.
     private var preview: Traveller {
-        Traveller(id: Traveller.you.id, name: CurrentUser.traveller.name, asset: asset, avatarURL: photoURL)
+        Traveller(
+            id: Traveller.you.id,
+            name: CurrentUser.traveller.name,
+            asset: asset,
+            avatarURL: photoURL
+        )
     }
 
     var body: some View {
@@ -42,12 +47,14 @@ struct AvatarPickerSheet: View {
 
             ScrollView {
                 VStack(spacing: 22) {
-                    MemojiAvatar(traveller: preview, size: 104)
+                    TravellerAvatar(traveller: preview, size: 104)
                         .padding(.top, 6)
 
                     photoRow
 
-                    if photoURL == nil { memojiGrid }
+                    if photoURL == nil {
+                        avatarGrid
+                    }
 
                     if let failure {
                         Label(failure, systemImage: "exclamationmark.circle")
@@ -120,7 +127,7 @@ struct AvatarPickerSheet: View {
             .panelSurface(corner: 18)
 
             if photoURL != nil {
-                Button("Use my memoji instead") {
+                Button("Use an avatar instead") {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { photoURL = nil }
                 }
                 .font(.system(size: 13, weight: .semibold))
@@ -131,18 +138,18 @@ struct AvatarPickerSheet: View {
         }
     }
 
-    // MARK: - Memoji
+    // MARK: - Avatars
 
-    private var memojiGrid: some View {
+    private var avatarGrid: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Memoji")
+            sectionLabel("Avatar")
 
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 5),
-                spacing: 12
+                columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5),
+                spacing: 14
             ) {
-                ForEach(Traveller.memoji, id: \.self) { candidate in
-                    memojiTile(candidate)
+                ForEach(Traveller.avatars, id: \.self) { candidate in
+                    avatarTile(candidate)
                 }
             }
             .padding(14)
@@ -150,7 +157,10 @@ struct AvatarPickerSheet: View {
         }
     }
 
-    private func memojiTile(_ candidate: String) -> some View {
+    /// Drawn the way it will be drawn everywhere else: filled to the circle,
+    /// no inset, nothing painted behind it. A tile that previewed the avatar
+    /// on a swatch would be showing a face this app no longer draws.
+    private func avatarTile(_ candidate: String) -> some View {
         let on = asset == candidate
 
         return Button {
@@ -160,7 +170,7 @@ struct AvatarPickerSheet: View {
             Image(candidate)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 52, height: 52)
+                .frame(width: 56, height: 56)
                 .clipShape(.circle)
                 .overlay {
                     Circle().strokeBorder(on ? AppTheme.accent : .clear, lineWidth: 2.5)
@@ -168,7 +178,7 @@ struct AvatarPickerSheet: View {
                 .overlay(alignment: .bottomTrailing) {
                     if on {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 16))
+                            .font(.system(size: 17))
                             .foregroundStyle(AppTheme.accent, AppTheme.card)
                             .offset(x: 2, y: 2)
                     }
@@ -203,12 +213,19 @@ struct AvatarPickerSheet: View {
             defer { isWorking = false }
             do {
                 try await SupabaseRepository.shared.updateAvatar(asset: asset, url: photoURL)
-                // Locally too, and immediately: every `MemojiAvatar` in the app
+                // Locally too, and immediately: every `TravellerAvatar` in the app
                 // reads `CurrentUser`, and waiting for the next sync would leave
                 // the old face on screen behind a sheet that just said "Saved".
                 CurrentUser.adoptAvatar(asset: asset, url: photoURL)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 onSaved()
+                GlassToastCenter.shared.show(.init(
+                    symbol: "face.smiling.fill",
+                    tint: AppTheme.accent,
+                    title: "Face updated",
+                    subtitle: "This is how you show up on every trip now.",
+                    duration: .seconds(3)
+                ))
                 dismiss()
             } catch {
                 failure = AuthService.message(for: error)

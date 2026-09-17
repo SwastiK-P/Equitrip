@@ -12,29 +12,29 @@ enum AppTheme {
 
     /// A single peach hue carried top-to-bottom — the gradient is the same
     /// colour deepening, never a second hue blended in.
-    static let canvasTop = dynamic(light: 0xFFF9F5, dark: 0x100D0B)
-    static let canvasBottom = dynamic(light: 0xF8E4D5, dark: 0x1B1512)
+    static let canvasTop = Brand.canvasTop
+    static let canvasBottom = Brand.canvasBottom
 
-    static let card = dynamic(light: 0xFFFFFF, dark: 0x221B17)
-    static let cardStroke = dynamic(light: 0x2A1810, dark: 0xFFFFFF)
+    static let card = Brand.card
+    static let cardStroke = Brand.cardStroke
 
     // MARK: - Content
 
-    static let ink = dynamic(light: 0x1A1109, dark: 0xF7F3F0)
-    static let inkSecondary = dynamic(light: 0x6B5B50, dark: 0xB0A49B)
-    static let inkTertiary = dynamic(light: 0x9C8B7F, dark: 0x7D7169)
+    static let ink = Brand.ink
+    static let inkSecondary = Brand.inkSecondary
+    static let inkTertiary = Brand.inkTertiary
 
     // MARK: - Accent
 
     /// Indigo, not green — it separates cleanly from the peach canvas without
     /// sitting in the same hue family, and keeps money colour semantic-free.
-    static let accent = dynamic(light: 0x4B45C6, dark: 0x9A93FF)
-    static let accentDeep = dynamic(light: 0x3A34A8, dark: 0x7C74F0)
+    static let accent = Brand.accent
+    static let accentDeep = Brand.accentDeep
 
-    static let cta = dynamic(light: 0x21150D, dark: 0xF7F3F0)
-    static let ctaLabel = dynamic(light: 0xFFFFFF, dark: 0x21150D)
+    static let cta = Brand.cta
+    static let ctaLabel = Brand.ctaLabel
 
-    static let danger = dynamic(light: 0xC5442E, dark: 0xF08A72)
+    static let danger = Brand.danger
 
     // MARK: - Money
 
@@ -44,7 +44,7 @@ enum AppTheme {
     static var moneyOut: Color { danger }
     static var moneyFlat: Color { inkSecondary }
 
-    static let positive = dynamic(light: 0x1E7A55, dark: 0x66D2A4)
+    static let positive = Brand.positive
 
     // MARK: - Elevation
 
@@ -63,15 +63,16 @@ enum AppTheme {
     /// around it — regions, counts, money — stays in the system sans, which is
     /// what makes the contrast do any work.
     static func display(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .system(size: size, weight: weight, design: .serif)
+        Brand.display(size, weight: weight)
     }
 
     // MARK: - Helpers
 
+    /// Kept as the app-side spelling of `Brand.dynamic` — the avatar
+    /// palettes below and a handful of one-off tints still build colours that
+    /// have no business being brand tokens.
     static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(uiColor: UIColor { trait in
-            UIColor(rgb: trait.userInterfaceStyle == .dark ? dark : light)
-        })
+        Brand.dynamic(light: light, dark: dark)
     }
 }
 
@@ -86,13 +87,13 @@ enum AppTheme {
 /// check, so views redrew that didn't need to. Hoisting them to `static let`
 /// makes each one a single shared instance.
 enum Palette {
-    static let blue = AppTheme.dynamic(light: 0x2F6FED, dark: 0x5E9BFF)
-    static let teal = AppTheme.dynamic(light: 0x0E7490, dark: 0x3FB6CE)
-    static let indigo = AppTheme.dynamic(light: 0x4B45C6, dark: 0x9A93FF)
-    static let violet = AppTheme.dynamic(light: 0x7C4DE0, dark: 0xA98BF5)
-    static let green = AppTheme.dynamic(light: 0x1E7A55, dark: 0x66D2A4)
-    static let amber = AppTheme.dynamic(light: 0xD97706, dark: 0xF0A93C)
-    static let stone = AppTheme.dynamic(light: 0x6B5B50, dark: 0xB0A49B)
+    static let blue = Brand.blue
+    static let teal = Brand.teal
+    static let indigo = Brand.indigo
+    static let violet = Brand.violet
+    static let green = Brand.green
+    static let amber = Brand.amber
+    static let stone = Brand.stone
 
     /// Slightly muted variants, for solid tiles where the bright tone shouts.
     static let greenDeep = AppTheme.dynamic(light: 0x1E7A55, dark: 0x2E9C72)
@@ -122,15 +123,18 @@ struct AvatarPalette {
     static func at(_ index: Int) -> AvatarPalette { all[index % all.count] }
 }
 
-// MARK: - UIColor hex
+// MARK: - Stored tints
 
-private extension UIColor {
-    convenience init(rgb: UInt32) {
-        self.init(
-            red: CGFloat((rgb >> 16) & 0xFF) / 255,
-            green: CGFloat((rgb >> 8) & 0xFF) / 255,
-            blue: CGFloat(rgb & 0xFF) / 255,
-            alpha: 1
-        )
+/// Maps a hex stored in Postgres back onto the palette colour it came from.
+extension Palette {
+    static func tint(forHex hex: String) -> Color {
+        switch hex.uppercased() {
+        case "D97706": Palette.amber
+        case "2F6FED": Palette.blue
+        case "7C4DE0": Palette.violet
+        case "0E7490": Palette.teal
+        case "1E7A55": Palette.green
+        default: AppTheme.accent
+        }
     }
 }

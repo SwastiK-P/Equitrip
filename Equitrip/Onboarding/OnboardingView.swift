@@ -6,6 +6,8 @@
 import SwiftUI
 
 struct OnboardingView: View {
+    @Environment(\.pane) private var pane
+
     @State private var appeared = false
 
     var onSignIn: () -> Void = {}
@@ -15,33 +17,10 @@ struct OnboardingView: View {
         ZStack {
             CanvasBackground()
 
-            // Fixed layout — no scrolling. Spacers absorb the slack, and the
-            // compact branch keeps it whole on shorter devices.
-            GeometryReader { geo in
-                let compact = geo.size.height < 780
-
-                VStack(spacing: 0) {
-                    Spacer(minLength: compact ? 12 : 24)
-
-                    OnboardingHero(appeared: appeared)
-                        .frame(height: compact ? 168 : 190)
-
-                    // Fixed, deliberately tight — the remaining slack goes to
-                    // the flexible spacers, which pushes the deck down the page.
-                    headline
-                        .padding(.top, compact ? 10 : 14)
-
-                    Spacer(minLength: compact ? 14 : 24)
-
-                    features
-
-                    Spacer(minLength: compact ? 14 : 24)
-
-                    actions
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 6)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if pane.isWide {
+                spread
+            } else {
+                column
             }
         }
         .onAppear {
@@ -49,18 +28,90 @@ struct OnboardingView: View {
         }
     }
 
+    /// The phone layout, and iPad in portrait: one column, hero at the top.
+    ///
+    /// Fixed — no scrolling. Spacers absorb the slack, and the compact branch
+    /// keeps it whole on shorter devices.
+    private var column: some View {
+        GeometryReader { geo in
+            let compact = geo.size.height < 780
+
+            VStack(spacing: 0) {
+                Spacer(minLength: compact ? 12 : 24)
+
+                OnboardingHero(appeared: appeared)
+                    .frame(height: compact ? 168 : 190)
+
+                // Fixed, deliberately tight — the remaining slack goes to
+                // the flexible spacers, which pushes the deck down the page.
+                headline
+                    .padding(.top, compact ? 10 : 14)
+
+                Spacer(minLength: compact ? 14 : 24)
+
+                features
+
+                Spacer(minLength: compact ? 14 : 24)
+
+                actions
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 6)
+            .frame(maxWidth: pane.readableWidth)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// iPad in landscape: the promise on one side, the proof on the other.
+    ///
+    /// The single column is a phone shape stood up — 190pt of illustration,
+    /// then a headline, then three cards, then two buttons, and on a landscape
+    /// iPad it either floats in the middle of a very wide screen or stretches
+    /// until the feature rows are a glyph and a sentence separated by a foot
+    /// of white. Landscape is a *wide* window, not a short tall one, so the
+    /// page turns ninety degrees with it: the illustration and the claim it
+    /// makes stay together on the left, the three things the app actually does
+    /// and the way in sit on the right, and nothing has to shrink.
+    private var spread: some View {
+        HStack(alignment: .center, spacing: 56) {
+            VStack(spacing: 0) {
+                OnboardingHero(appeared: appeared)
+                    // The deck is drawn at a fixed 324pt — it's an
+                    // illustration made of real cards, and rebuilding it
+                    // fluid would mean re-tuning the depth offsets that make
+                    // it read as a deck. Scaled instead, which is what you'd
+                    // do with any other piece of artwork given more wall.
+                    .scaleEffect(1.2)
+                    .frame(height: 250)
+
+                headline
+                    .padding(.top, 26)
+            }
+            .frame(maxWidth: .infinity)
+
+            VStack(spacing: 26) {
+                features
+                actions
+            }
+            .frame(maxWidth: 420)
+        }
+        .padding(.horizontal, 56)
+        .frame(maxWidth: 1100)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     // MARK: - Headline
 
     private var headline: some View {
         VStack(spacing: 10) {
             Text("Split the trip,\nnot the friendship.")
-                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .font(.system(size: pane.isRegular ? 38 : 30, weight: .bold, design: .rounded))
                 .foregroundStyle(AppTheme.ink)
                 .multilineTextAlignment(.center)
                 .lineSpacing(2)
 
             Text("Every booking, expense and balance in one shared plan.")
-                .font(.system(size: 15))
+                .font(.system(size: pane.isRegular ? 17 : 15))
                 .foregroundStyle(AppTheme.inkSecondary)
                 .multilineTextAlignment(.center)
                 .lineSpacing(2)

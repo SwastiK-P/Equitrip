@@ -212,7 +212,7 @@ struct TripParticipantsStage: View {
 
     private var youRow: some View {
         HStack(spacing: 13) {
-            MemojiAvatar(traveller: .you, size: 38)
+            TravellerAvatar(traveller: .you, size: 38)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(Traveller.you.name)
@@ -243,7 +243,7 @@ struct TripParticipantsStage: View {
                     .controlSize(.small)
                     .frame(width: 38, height: 38)
             case .member(let person), .invited(let person):
-                MemojiAvatar(traveller: person, size: 38)
+                TravellerAvatar(traveller: person, size: 38)
             case .failed:
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 21))

@@ -8,31 +8,38 @@ import SwiftUI
 /// What the bell opens. Unread items keep a full-strength card and an accent
 /// rail; read ones recede rather than disappear, so the list stays a history.
 ///
-/// Payments come first and come with buttons. Everything else in this list is
-/// news you read and move past; a payment somebody recorded against a booking
-/// you're on is a claim on your money, and the only useful thing to do with a
-/// claim is agree with it or don't. Leaving those two answers out is what made
-/// "settle with proof, not promises" a slogan rather than a feature.
+/// Purely a feed — a payment somebody recorded is taken as confirmed the
+/// moment it lands here, and there's nothing to answer. Anyone who thinks a
+/// payment is wrong reports it from the booking itself, not from this list.
 struct NotificationsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.notificationStore) private var store
-    @Environment(\.tripStore) private var trips
 
-    private var pending: [AppNotification] { store.awaitingResponse }
-    private var unread: [AppNotification] { store.unread.filter { !$0.needsResponse } }
-    private var earlier: [AppNotification] { store.read }
+    /// Nil means "All". A person on a busy trip has expenses, bookings and
+    /// arrivals all landing in one feed, and "just show me the money stuff"
+    /// is a question worth answering without scrolling for it.
+    @State private var filter: NotificationChannel?
 
-    private var isEmpty: Bool { pending.isEmpty && unread.isEmpty && earlier.isEmpty }
+    private var filtered: [AppNotification] {
+        guard let filter else { return store.feed }
+        return store.feed.filter { $0.kind.channel == filter }
+    }
+
+    private var unread: [AppNotification] { filtered.filter(\.isUnread) }
+    private var earlier: [AppNotification] { filtered.filter { !$0.isUnread } }
+
+    private var isEmpty: Bool { unread.isEmpty && earlier.isEmpty }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 18) {
+                if !store.feed.isEmpty {
+                    filters
+                }
+
                 if isEmpty {
                     emptyState
                 } else {
-                    if !pending.isEmpty {
-                        group(title: "Needs you", items: pending, tint: AppTheme.accent)
-                    }
                     if !unread.isEmpty {
                         group(title: "New", items: unread)
                     }
@@ -89,11 +96,38 @@ struct NotificationsSheet: View {
     }
 
     private var subtitle: String {
-        if !pending.isEmpty {
-            return "\(pending.count.pluralised("payment")) waiting on you"
-        }
         if store.unread.isEmpty { return "You're all caught up" }
         return "\(store.unread.count) unread · tap to read"
+    }
+
+    private var filters: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                NotificationFilterChip(label: "All", count: store.feed.count, isOn: filter == nil) {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.85)) { filter = nil }
+                }
+
+                ForEach(Self.channelsPresent(in: store.feed)) { channel in
+                    NotificationFilterChip(
+                        label: channel.title,
+                        count: store.feed.filter { $0.kind.channel == channel }.count,
+                        isOn: filter == channel
+                    ) {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.85)) { filter = channel }
+                    }
+                }
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 2)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// Only the categories actually represented — a "People" chip on a feed
+    /// with nobody having joined anything is a filter for an empty list.
+    private static func channelsPresent(in feed: [AppNotification]) -> [NotificationChannel] {
+        let present = Set(feed.map(\.kind.channel))
+        return NotificationChannel.allCases.filter { present.contains($0) }
     }
 
     private var emptyState: some View {
@@ -106,10 +140,14 @@ struct NotificationsSheet: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(AppTheme.ink)
 
-            Text("Bookings, payments and arrivals on your trips land here.")
-                .font(.system(size: 13.5))
-                .foregroundStyle(AppTheme.inkSecondary)
-                .multilineTextAlignment(.center)
+            Text(
+                filter == nil
+                    ? "Bookings, payments and arrivals on your trips land here."
+                    : "Nothing in \(filter!.title.lowercased()) yet."
+            )
+            .font(.system(size: 13.5))
+            .foregroundStyle(AppTheme.inkSecondary)
+            .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
@@ -130,11 +168,7 @@ struct NotificationsSheet: View {
 
             VStack(spacing: 10) {
                 ForEach(items) { item in
-                    NotificationCard(item: item) { response in
-                        withAnimation(.spring(response: 0.42, dampingFraction: 0.85)) {
-                            store.respond(response, to: item, in: trips.trip(item.tripID))
-                        }
-                    } onRead: {
+                    NotificationCard(item: item) {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                             store.markRead(item.id)
                         }
@@ -145,34 +179,57 @@ struct NotificationsSheet: View {
     }
 }
 
+// MARK: - Filter chip
+
+private struct NotificationFilterChip: View {
+    let label: String
+    let count: Int
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.system(size: 13, weight: .semibold))
+
+                Text("\(count)")
+                    .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                    .opacity(0.7)
+            }
+            .foregroundStyle(isOn ? AppTheme.ctaLabel : AppTheme.inkSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background {
+                Capsule().fill(isOn ? AnyShapeStyle(AppTheme.cta) : AnyShapeStyle(AppTheme.card.opacity(0.7)))
+            }
+            .overlay { Capsule().strokeBorder(AppTheme.cardStroke.opacity(isOn ? 0 : 0.07)) }
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Card
 
 private struct NotificationCard: View {
     let item: AppNotification
-    var onRespond: (AppNotification.Response) -> Void
     var onRead: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Button {
-                guard item.isUnread else { return }
-                onRead()
-            } label: {
-                summary
-            }
-            .buttonStyle(PressableButtonStyle())
-            .disabled(!item.isUnread)
-
-            if item.needsResponse {
-                Hairline(inset: 14)
-                responseBar
-            } else if let response = item.response {
-                Hairline(inset: 14)
-                answered(response)
-            }
+        Button {
+            guard item.isUnread else { return }
+            onRead()
+        } label: {
+            summary
         }
+        .buttonStyle(PressableButtonStyle())
+        .disabled(!item.isUnread)
         .cardSurface(corner: 20, shadow: item.isUnread ? 14 : 8)
-        .opacity(item.isUnread || item.needsResponse ? 1 : 0.72)
+        .opacity(item.isUnread ? 1 : 0.72)
     }
 
     private var summary: some View {
@@ -220,65 +277,6 @@ private struct NotificationCard: View {
         }
         .padding(14)
         .contentShape(.rect)
-    }
-
-    /// Two answers, equal weight.
-    ///
-    /// Disputing is not the destructive option and isn't styled as one — most
-    /// disputes are "that was ₹1,800, not ₹8,100", which is somebody being
-    /// helpful. Making it red would make raising one feel like an accusation,
-    /// and a dispute nobody is willing to raise is a ledger that quietly
-    /// disagrees with everyone's bank statement.
-    private var responseBar: some View {
-        HStack(spacing: 10) {
-            Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                onRespond(.disputed)
-            } label: {
-                responseLabel(symbol: "exclamationmark.bubble", title: "Dispute")
-            }
-            .buttonStyle(.glass)
-            .tint(AppTheme.inkSecondary)
-
-            Button {
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                onRespond(.confirmed)
-            } label: {
-                responseLabel(symbol: "checkmark", title: "Confirm")
-            }
-            .buttonStyle(.glassProminent)
-            .tint(AppTheme.positive)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    private func responseLabel(symbol: String, title: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 7)
-    }
-
-    private func answered(_ response: AppNotification.Response) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: response.symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(response.tint)
-
-            Text("You \(response.label.lowercased()) this")
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(AppTheme.inkSecondary)
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .transition(.opacity)
     }
 }
 

@@ -23,3 +23,12 @@ Package.pins
 supabase/.branches/
 supabase/.temp/
 supabase/migrations/
+
+EQUITRIP_MASTER_DOC.md
+# Xcode per-user state (`*.xcuserdata/` above doesn't match the `xcuserdata/` folder itself)
+xcuserdata/
+
+# Claude Code — CLAUDE.md files, .claude/settings.json and scripts/ are shared; per-user state isn't
+.claude/settings.local.json
+.claude/buzz/
+.claude/scheduled_tasks.lock

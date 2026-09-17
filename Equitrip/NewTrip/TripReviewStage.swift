@@ -18,6 +18,15 @@ struct TripReviewStage: View {
     @State private var editingItem: ItineraryItem?
     @State private var isAddingItem = false
     @State private var showTravellerPicker = false
+    @State private var showLocationPicker = false
+    @State private var showImageSource = false
+    @State private var isEditingTitle = false
+    /// What the consistency check has found so far, and how far it has got.
+    /// Derived from the bookings on every change and never stored — a warning
+    /// that outlived the booking it was about would be the worse bug.
+    @State private var issues: [ItineraryIssue] = []
+    @State private var checkState: ItineraryCheckState = .checking
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -25,6 +34,18 @@ struct TripReviewStage: View {
                 cover
 
                 if draft.wasImported { importNote }
+
+                // Under the note about how the bookings were read, above the
+                // bookings themselves: the same reading order as the sentence
+                // "here is what we found, and here is what looks wrong with
+                // it". Shown on the hand-built route too — a trip typed in by
+                // hand double-books an afternoon just as readily as an
+                // imported one.
+                if !draft.items.isEmpty {
+                    ItineraryIssueCard(state: checkState, issues: issues, bookingCount: draft.items.count) { id in
+                        editingItem = draft.items.first { $0.id == id }
+                    }
+                }
 
                 travellers
                 bookings
@@ -37,9 +58,39 @@ struct TripReviewStage: View {
             .padding(.bottom, 30)
         }
         .scrollIndicators(.hidden)
+        .task(id: checkKey) { await runCheck() }
         .safeAreaInset(edge: .bottom) { createBar }
         .sheet(isPresented: $showTravellerPicker) {
             TravellerPickerSheet(travellers: $draft.travellers)
+        }
+        .sheet(isPresented: $showLocationPicker) {
+            LocationPickerSheet(initial: draft.destination) { picked in
+                draft.destination = picked
+                // The old cover was fetched for the old place; drop it so the
+                // new destination resolves its own rather than keeping a
+                // photograph of somewhere the group is no longer going.
+                draft.cover = nil
+            }
+        }
+        .sheet(isPresented: $showImageSource) {
+            ImageSourceSheet(
+                suggestedQuery: draft.destination.isEmpty ? draft.title : draft.destination,
+                onPickUnsplash: { photo in
+                    let tripID = draft.id
+                    Task {
+                        let stored = await CoverStore.shared.persist(photo, for: tripID)
+                        draft.cover = stored
+                    }
+                },
+                onPickLibrary: { data in
+                    let tripID = draft.id
+                    Task {
+                        if let stored = await CoverStore.shared.persist(imageData: data, for: tripID) {
+                            draft.cover = stored
+                        }
+                    }
+                }
+            )
         }
         .sheet(item: $editingItem) { item in
             ItineraryItemEditor(
@@ -68,12 +119,85 @@ struct TripReviewStage: View {
                 isNew: true,
                 onSave: { new in
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
-                        draft.items.append(new)
-                        expandSpanToFit(new)
+                        // The editor saves twice: once straight away, and
+                        // again a moment later with the glyph it worked out in
+                        // the background. Appending both put every booking on
+                        // the trip twice. `TripStore.addItem` upserts for this
+                        // exact reason; so does this.
+                        if let index = draft.items.firstIndex(where: { $0.id == new.id }) {
+                            draft.items[index] = new
+                        } else {
+                            draft.items.append(new)
+                            expandSpanToFit(new)
+                        }
                     }
                 }
             )
         }
+    }
+
+    // MARK: - Consistency check
+
+    /// Only the fields the check actually reads.
+    ///
+    /// Keying the task on `draft.items` wholesale would restart the model
+    /// every time a cover photo resolved or somebody was added to a split —
+    /// neither of which can change whether two bookings clash.
+    private var checkKey: String {
+        let bookings = draft.items.map { item in
+            "\(item.id)|\(item.date.timeIntervalSince1970)|\(item.time?.timeIntervalSince1970 ?? -1)"
+                + "|\(item.kind.rawValue)|\(item.title)|\(item.flight?.number ?? "")"
+        }
+        return (bookings + [
+            "\(draft.startDate.timeIntervalSince1970)",
+            "\(draft.endDate.timeIntervalSince1970)"
+        ]).joined(separator: ";")
+    }
+
+    /// Arithmetic first and instantly, judgement after and gradually.
+    ///
+    /// The rule pass is synchronous and offline, so its findings are on screen
+    /// before the model has produced a token — which means the card is never
+    /// an empty box with a spinner in it, and a device that can't run Apple
+    /// Intelligence at all still gets the half of this that is subtraction.
+    @MainActor
+    private func runCheck() async {
+        guard !draft.items.isEmpty else {
+            issues = []
+            checkState = .done(usedFallback: false)
+            return
+        }
+
+        // Editing a booking changes the key on every save; a burst of edits
+        // shouldn't start a burst of model passes. `task(id:)` has already
+        // cancelled the previous one by the time this runs.
+        try? await Task.sleep(for: .milliseconds(400))
+        guard !Task.isCancelled else { return }
+
+        let span = min(draft.startDate, draft.endDate)...max(draft.startDate, draft.endDate)
+        let rules = ItineraryConsistency.check(draft.items, span: span)
+        issues = rules
+
+        guard case .ready = ItineraryInspector.availability else {
+            checkState = .done(usedFallback: true)
+            return
+        }
+
+        checkState = .checking
+
+        let stream = ItineraryInspector.stream(
+            items: draft.items,
+            destination: draft.destination,
+            known: rules
+        )
+
+        for await found in stream {
+            guard !Task.isCancelled else { return }
+            issues = ItineraryConsistency.ordered(rules + found)
+        }
+
+        guard !Task.isCancelled else { return }
+        checkState = .done(usedFallback: false)
     }
 
     // MARK: - Cover
@@ -90,17 +214,38 @@ struct TripReviewStage: View {
         .frame(maxWidth: .infinity)
         .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(draft.title.isEmpty ? "Untitled trip" : draft.title)
-                    .font(.system(size: 23, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-
-                HStack(spacing: 6) {
-                    Image(systemName: "mappin.and.ellipse")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(draft.destination.isEmpty ? "No destination set" : draft.destination)
-                        .font(.system(size: 13, weight: .medium))
+                Group {
+                    if isEditingTitle {
+                        TextField("Untitled trip", text: $draft.title)
+                            .focused($titleFocused)
+                            .submitLabel(.done)
+                            .onSubmit { isEditingTitle = false }
+                            .tint(.white)
+                    } else {
+                        Text(draft.title.isEmpty ? "Untitled trip" : draft.title)
+                            .onTapGesture {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                isEditingTitle = true
+                                titleFocused = true
+                            }
+                    }
                 }
-                .foregroundStyle(.white.opacity(0.9))
+                .font(.system(size: 23, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showLocationPicker = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(draft.destination.isEmpty ? "No destination set" : draft.destination)
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.9))
+                }
+                .buttonStyle(.plain)
             }
             .lineLimit(1)
             .shadow(color: .black.opacity(0.45), radius: 6, y: 1)
@@ -111,7 +256,29 @@ struct TripReviewStage: View {
                 .frame(height: 96)
                 .allowsHitTesting(false)
         }
+        .overlay(alignment: .topTrailing) {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showImageSource = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Change")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.black.opacity(0.4), in: .capsule)
+                .padding(10)
+            }
+            .buttonStyle(.plain)
+        }
         .clipShape(.rect(cornerRadius: 24, style: .continuous))
+        .onChange(of: titleFocused) { _, focused in
+            if !focused { isEditingTitle = false }
+        }
     }
 
     /// Says which reader produced this, so nobody assumes an accuracy the

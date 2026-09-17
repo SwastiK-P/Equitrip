@@ -7,17 +7,100 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7A7D0074305456EC0056A522 /* EquitripWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 7A7D006A305456EB0056A522 /* EquitripWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		AB1000000000000000000003 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = AB1000000000000000000002 /* Supabase */; };
+		AB200000000000000000000B /* EquitripWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AB2000000000000000000001 /* EquitripWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		7A7D0072305456EC0056A522 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7A1A53FF3040297700A88F88 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7A7D0069305456EB0056A522;
+			remoteInfo = "EquitripWatch Watch App";
+		};
+		AB2000000000000000000009 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7A1A53FF3040297700A88F88 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AB2000000000000000000004;
+			remoteInfo = EquitripWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7A7D0078305456EC0056A522 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				7A7D0074305456EC0056A522 /* EquitripWatch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AB2000000000000000000008 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				AB200000000000000000000B /* EquitripWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		7A1A54073040297700A88F88 /* Equitrip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Equitrip.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A7D006A305456EB0056A522 /* EquitripWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "EquitripWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB2000000000000000000001 /* EquitripWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = EquitripWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		AB3000000000000000000001 /* Exceptions for "EquitripShared" folder in "EquitripWatch Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AddExpenseIntent.swift,
+				OpenEquiIntent.swift,
+			);
+			target = 7A7D0069305456EB0056A522 /* EquitripWatch Watch App */;
+		};
+		AB3000000000000000000002 /* Exceptions for "EquitripShared" folder in "EquitripWidgets" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				WatchMessage.swift,
+			);
+			target = AB2000000000000000000004 /* EquitripWidgets */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		7A1A54093040297700A88F88 /* Equitrip */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Equitrip;
+			sourceTree = "<group>";
+		};
+		7A7D006B305456EB0056A522 /* EquitripWatch Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "EquitripWatch Watch App";
+			sourceTree = "<group>";
+		};
+		AB2000000000000000000002 /* EquitripShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				AB3000000000000000000002 /* Exceptions for "EquitripShared" folder in "EquitripWidgets" target */,
+				AB3000000000000000000001 /* Exceptions for "EquitripShared" folder in "EquitripWatch Watch App" target */,
+			);
+			path = EquitripShared;
+			sourceTree = "<group>";
+		};
+		AB2000000000000000000003 /* EquitripWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = EquitripWidgets;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -31,6 +114,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7A7D0067305456EB0056A522 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AB2000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -38,6 +135,9 @@
 			isa = PBXGroup;
 			children = (
 				7A1A54093040297700A88F88 /* Equitrip */,
+				AB2000000000000000000002 /* EquitripShared */,
+				AB2000000000000000000003 /* EquitripWidgets */,
+				7A7D006B305456EB0056A522 /* EquitripWatch Watch App */,
 				7A1A54083040297700A88F88 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -46,6 +146,8 @@
 			isa = PBXGroup;
 			children = (
 				7A1A54073040297700A88F88 /* Equitrip.app */,
+				AB2000000000000000000001 /* EquitripWidgets.appex */,
+				7A7D006A305456EB0056A522 /* EquitripWatch Watch App.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -60,13 +162,18 @@
 				7A1A54033040297700A88F88 /* Sources */,
 				7A1A54043040297700A88F88 /* Frameworks */,
 				7A1A54053040297700A88F88 /* Resources */,
+				AB2000000000000000000008 /* Embed Foundation Extensions */,
+				7A7D0078305456EC0056A522 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AB200000000000000000000A /* PBXTargetDependency */,
+				7A7D0073305456EC0056A522 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				7A1A54093040297700A88F88 /* Equitrip */,
+				AB2000000000000000000002 /* EquitripShared */,
 			);
 			name = Equitrip;
 			packageProductDependencies = (
@@ -75,6 +182,52 @@
 			productName = Equitrip;
 			productReference = 7A1A54073040297700A88F88 /* Equitrip.app */;
 			productType = "com.apple.product-type.application";
+		};
+		7A7D0069305456EB0056A522 /* EquitripWatch Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7A7D0075305456EC0056A522 /* Build configuration list for PBXNativeTarget "EquitripWatch Watch App" */;
+			buildPhases = (
+				7A7D0066305456EB0056A522 /* Sources */,
+				7A7D0067305456EB0056A522 /* Frameworks */,
+				7A7D0068305456EB0056A522 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7A7D006B305456EB0056A522 /* EquitripWatch Watch App */,
+				AB2000000000000000000002 /* EquitripShared */,
+			);
+			name = "EquitripWatch Watch App";
+			packageProductDependencies = (
+			);
+			productName = "EquitripWatch Watch App";
+			productReference = 7A7D006A305456EB0056A522 /* EquitripWatch Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		AB2000000000000000000004 /* EquitripWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB200000000000000000000C /* Build configuration list for PBXNativeTarget "EquitripWidgets" */;
+			buildPhases = (
+				AB2000000000000000000005 /* Sources */,
+				AB2000000000000000000006 /* Frameworks */,
+				AB2000000000000000000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AB2000000000000000000002 /* EquitripShared */,
+				AB2000000000000000000003 /* EquitripWidgets */,
+			);
+			name = EquitripWidgets;
+			packageProductDependencies = (
+			);
+			productName = EquitripWidgets;
+			productReference = AB2000000000000000000001 /* EquitripWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -87,6 +240,12 @@
 				LastUpgradeCheck = 2660;
 				TargetAttributes = {
 					7A1A54063040297700A88F88 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					7A7D0069305456EB0056A522 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					AB2000000000000000000004 = {
 						CreatedOnToolsVersion = 26.6;
 					};
 				};
@@ -109,12 +268,28 @@
 			projectRoot = "";
 			targets = (
 				7A1A54063040297700A88F88 /* Equitrip */,
+				AB2000000000000000000004 /* EquitripWidgets */,
+				7A7D0069305456EB0056A522 /* EquitripWatch Watch App */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		7A1A54053040297700A88F88 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A7D0068305456EB0056A522 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AB2000000000000000000007 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -131,7 +306,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7A7D0066305456EB0056A522 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AB2000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7A7D0073305456EC0056A522 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7A7D0069305456EB0056A522 /* EquitripWatch Watch App */;
+			targetProxy = 7A7D0072305456EC0056A522 /* PBXContainerItemProxy */;
+		};
+		AB200000000000000000000A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AB2000000000000000000004 /* EquitripWidgets */;
+			targetProxy = AB2000000000000000000009 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		7A1A54103040297900A88F88 /* Debug */ = {
@@ -187,7 +389,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -245,7 +447,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -260,18 +462,22 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Equitrip.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = D6743AUZU3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Equitrip-Info.plist";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan boarding passes and trip invite QR codes.";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan receipts, boarding passes and trip invite QR codes. Receipts are read on this iPhone.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Equitrip saves a UPI QR code to your photos when you tap Save QR.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIUserInterfaceStyle = Light;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -280,6 +486,9 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.swastik.Equitrip;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -294,18 +503,22 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Equitrip.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = D6743AUZU3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Equitrip-Info.plist";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan boarding passes and trip invite QR codes.";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan receipts, boarding passes and trip invite QR codes. Receipts are read on this iPhone.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Equitrip saves a UPI QR code to your photos when you tap Save QR.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UIUserInterfaceStyle = Light;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -314,8 +527,135 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.swastik.Equitrip;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		7A7D0076305456EC0056A522 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = D6743AUZU3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Equitrip;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.swastik.Equitrip;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.swastik.Equitrip.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Debug;
+		};
+		7A7D0077305456EC0056A522 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = D6743AUZU3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Equitrip;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.swastik.Equitrip;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.swastik.Equitrip.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Release;
+		};
+		AB200000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = EquitripWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = D6743AUZU3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "EquitripWidgets-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Equitrip;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.swastik.Equitrip.EquitripWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AB200000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = EquitripWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = D6743AUZU3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "EquitripWidgets-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Equitrip;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.swastik.Equitrip.EquitripWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -340,6 +680,24 @@
 			buildConfigurations = (
 				7A1A54133040297900A88F88 /* Debug */,
 				7A1A54143040297900A88F88 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7A7D0075305456EC0056A522 /* Build configuration list for PBXNativeTarget "EquitripWatch Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A7D0076305456EC0056A522 /* Debug */,
+				7A7D0077305456EC0056A522 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB200000000000000000000C /* Build configuration list for PBXNativeTarget "EquitripWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB200000000000000000000D /* Debug */,
+				AB200000000000000000000E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

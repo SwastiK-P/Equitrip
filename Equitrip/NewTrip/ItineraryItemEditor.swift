@@ -22,7 +22,7 @@ struct ItineraryItemEditor: View {
     @State private var showCameraUnavailableAlert = false
     @State private var showParticipants = false
     @State private var showPayment = false
-    @State private var showImageSource = false
+    @State private var confirmingDelete = false
 
     let travellers: [Traveller]
     let currencyCode: String
@@ -50,15 +50,28 @@ struct ItineraryItemEditor: View {
     }
 
     private var canSave: Bool {
-        draft.title.trimmingCharacters(in: .whitespaces).count >= 2
+        guard draft.title.trimmingCharacters(in: .whitespaces).count >= 2 else { return false }
+        // Exact amounts that don't add up to the cost are the one kind of
+        // half-finished booking worth blocking. Every other field can be wrong
+        // and only misinform somebody; this one silently loses or invents
+        // money in the balances, and nothing downstream can tell that it did.
+        if draft.split.isCustom, targetCost > 0, abs(unassigned) >= 0.01 { return false }
+        return true
     }
+
+    private var targetCost: Double { max(0, Double(costText) ?? 0) }
+
+    /// Sum of what's been typed against the people on the booking.
+    private var assigned: Double {
+        chosenTravellers.reduce(0) { $0 + (draft.customShares[$1.id] ?? 0) }
+    }
+
+    private var unassigned: Double { targetCost - assigned }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 kindPicker
-
-                photo
 
                 VStack(alignment: .leading, spacing: 14) {
                     GlassField(
@@ -92,10 +105,15 @@ struct ItineraryItemEditor: View {
                 }
 
                 splitPicker
+
+                if draft.split.isCustom {
+                    exactAmounts
+                }
+
                 participants
                 payment
 
-                if let onDelete { deleteButton(onDelete) }
+                if onDelete != nil { deleteButton }
 
                 Color.clear.frame(height: 10)
             }
@@ -130,24 +148,8 @@ struct ItineraryItemEditor: View {
                 travellers: travellers,
                 shareEach: shareEach,
                 currencyCode: currencyCode,
-                selection: $draft.participantIDs
-            )
-        }
-        .sheet(isPresented: $showImageSource) {
-            ImageSourceSheet(
-                suggestedQuery: photoQuerySeed,
-                onPickUnsplash: { photo in
-                    Task {
-                        draft.cover = await CoverStore.shared.persist(photo, for: draft.id)
-                    }
-                },
-                onPickLibrary: { data in
-                    Task {
-                        if let stored = await CoverStore.shared.persist(imageData: data, for: draft.id) {
-                            draft.cover = stored
-                        }
-                    }
-                }
+                selection: $draft.participantIDs,
+                singleSelection: draft.split.isSinglePerson
             )
         }
         .sheet(isPresented: $showPayment) {
@@ -165,6 +167,25 @@ struct ItineraryItemEditor: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Boarding pass scanning needs a real device's camera. Type the flight number instead.")
+        }
+        .confirmationDialog(
+            "Remove this booking?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Remove booking", role: .destructive) {
+                onDelete?()
+                GlassToastCenter.shared.show(.init(
+                    symbol: "trash",
+                    tint: AppTheme.danger,
+                    title: "Booking removed",
+                    subtitle: "\"\(draft.title)\" is gone from the itinerary and the ledger."
+                ))
+                dismiss()
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text("This takes it out of the itinerary and the ledger for everyone on the trip. It can't be undone.")
         }
     }
 
@@ -184,69 +205,6 @@ struct ItineraryItemEditor: View {
         .padding(.horizontal, 20)
         .padding(.top, 20)
         .padding(.bottom, 12)
-    }
-
-    // MARK: - Photo
-
-    /// A photo is optional and, unlike the trip cover, never auto-resolved —
-    /// most bookings don't deserve one, so nothing is fetched until someone
-    /// asks for it.
-    private var photo: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            label("Photo")
-
-            Button {
-                showImageSource = true
-            } label: {
-                ZStack {
-                    if let cover = draft.cover {
-                        AsyncImage(url: cover.url) { phase in
-                            switch phase {
-                            case .success(let image): image.resizable().scaledToFill()
-                            default: AppTheme.card
-                            }
-                        }
-                    } else {
-                        AppTheme.card
-                        VStack(spacing: 6) {
-                            Image(systemName: "photo.badge.plus")
-                                .font(.system(size: 22, weight: .medium))
-                                .foregroundStyle(AppTheme.inkTertiary)
-                            Text("Add a photo")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(AppTheme.inkTertiary)
-                        }
-                    }
-                }
-                .frame(height: draft.cover == nil ? 90 : 140)
-                .frame(maxWidth: .infinity)
-                .clipShape(.rect(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(AppTheme.cardStroke.opacity(0.07))
-                }
-                .overlay(alignment: .topTrailing) {
-                    if draft.cover != nil {
-                        HStack(spacing: 5) {
-                            Image(systemName: "photo.on.rectangle.angled")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("Change")
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.black.opacity(0.4), in: .capsule)
-                        .padding(10)
-                    }
-                }
-            }
-            .buttonStyle(PressableButtonStyle())
-        }
-    }
-
-    private var photoQuerySeed: String {
-        draft.title.trimmingCharacters(in: .whitespaces).isEmpty ? draft.vendor : draft.title
     }
 
     // MARK: - Kind
@@ -367,82 +325,189 @@ struct ItineraryItemEditor: View {
     /// Flight number is the only field anyone types; everything else here —
     /// route, terminal, scheduled times, live status — comes from a lookup,
     /// whether that number was typed or lifted off a scanned boarding pass.
+    ///
+    /// Rebuilt because it was a panel inside a section inside a form: a
+    /// labelled text field with its own inset, two half-width buttons under it,
+    /// and then a whole boarding pass and a map crammed into the same padded
+    /// box. Everything was correct and nothing had any room. The number now
+    /// reads the way a flight number is written — large and monospaced, next to
+    /// the glyph — the two actions are one row of the same card rather than two
+    /// floating buttons, and the results that arrive are full-width blocks
+    /// underneath instead of being squeezed into the input's container.
     private var flightSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             label("Flight tracking")
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    GlassField(
-                        label: "Flight number",
-                        placeholder: "6E 5312",
-                        text: $flightNumberText,
-                        symbol: "number",
-                        autocapitalisation: .characters
-                    )
+            VStack(spacing: 0) {
+                numberField
+                Hairline(inset: 0)
+                lookupActions
+            }
+            .panelSurface(corner: 20)
+
+            if let flightLookupError {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.top, 1)
+                    Text(flightLookupError)
+                        .font(.system(size: 12.5))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(AppTheme.danger)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(AppTheme.danger.opacity(0.08), in: .rect(cornerRadius: 14, style: .continuous))
+            }
+
+            if let flight = draft.flight, flight.isResolved {
+                // Editor gets the live status: you just pressed the button, so
+                // it's as current as it will ever be.
+                FlightTicketCard(flight: flight, fallbackDeparture: draft.time)
+                FlightRouteMap(flight: flight)
+                lastChecked(flight)
+            } else {
+                Text(
+                    FlightConfig.isConfigured
+                        ? "Look it up to pull in the route, terminal and scheduled times. The number is saved either way."
+                        : "Live lookup needs a free AviationStack key — see FlightConfig.swift. The number is still saved either way."
+                )
+                .font(.system(size: 12.5))
+                .foregroundStyle(AppTheme.inkTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 2)
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: draft.flight)
+    }
+
+    private var numberField: some View {
+        HStack(spacing: 12) {
+            SymbolBadge(symbol: "airplane", tint: ItineraryKind.flight.tint, size: 38)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("FLIGHT NUMBER")
+                    .font(.system(size: 9.5, weight: .bold))
+                    .tracking(0.9)
+                    .foregroundStyle(AppTheme.inkTertiary)
+
+                TextField("6E 5312", text: $flightNumberText)
+                    .font(.system(size: 21, weight: .bold, design: .monospaced))
+                    .foregroundStyle(AppTheme.ink)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .onSubmit { Task { await lookUpFlight() } }
                     .onChange(of: flightNumberText) { _, newValue in
-                        flightNumberText = newValue.uppercased()
+                        let upper = newValue.uppercased()
+                        if upper != newValue { flightNumberText = upper }
+                        flightLookupError = nil
+                    }
+            }
+
+            Spacer(minLength: 6)
+
+            if let flight = draft.flight, flight.isResolved, let status = flight.status {
+                Text(status.label.uppercased())
+                    .font(.system(size: 9.5, weight: .bold))
+                    .tracking(0.5)
+                    .foregroundStyle(status.tint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4.5)
+                    .background(status.tint.opacity(0.14), in: .capsule)
+                    .fixedSize()
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private var lookupActions: some View {
+        HStack(spacing: 0) {
+            flightAction(
+                symbol: "doc.viewfinder",
+                title: "Scan pass",
+                detail: "Read on device",
+                isEnabled: true,
+                isBusy: false,
+                action: presentScanner
+            )
+
+            Rectangle()
+                .fill(AppTheme.cardStroke.opacity(0.09))
+                .frame(width: 1, height: 34)
+
+            flightAction(
+                symbol: "arrow.triangle.2.circlepath",
+                title: "Look up",
+                detail: draft.flight?.isResolved == true ? "Refresh details" : "Route and times",
+                isEnabled: !flightNumberText.trimmingCharacters(in: .whitespaces).isEmpty && !isLookingUpFlight,
+                isBusy: isLookingUpFlight,
+                action: { Task { await lookUpFlight() } }
+            )
+        }
+    }
+
+    private func flightAction(
+        symbol: String,
+        title: String,
+        detail: String,
+        isEnabled: Bool,
+        isBusy: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            HStack(spacing: 9) {
+                Group {
+                    if isBusy {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: symbol)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(AppTheme.accent)
                     }
                 }
+                .frame(width: 20)
 
-                HStack(spacing: 10) {
-                    Button {
-                        presentScanner()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "camera.viewfinder")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("Scan boarding pass")
-                                .font(.system(size: 13.5, weight: .semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                    }
-                    .buttonStyle(.glass)
-
-                    Button {
-                        Task { await lookUpFlight() }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if isLookingUpFlight {
-                                ProgressView().controlSize(.mini)
-                            } else {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.system(size: 13, weight: .semibold))
-                            }
-                            Text("Look up")
-                                .font(.system(size: 13.5, weight: .semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 11)
-                    }
-                    .buttonStyle(.glass)
-                    .disabled(flightNumberText.trimmingCharacters(in: .whitespaces).isEmpty || isLookingUpFlight)
-                }
-
-                if let flight = draft.flight, flight.isResolved {
-                    // Editor gets the live status: you just pressed the button,
-                    // so it's as current as it will ever be.
-                    FlightTicketCard(flight: flight, fallbackDeparture: draft.time)
-                    FlightRouteMap(flight: flight)
-                } else if !FlightConfig.isConfigured {
-                    Text("Live lookup needs a free AviationStack key — see FlightConfig.swift. The number is still saved either way.")
-                        .font(.system(size: 12))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppTheme.ink)
+                    Text(detail)
+                        .font(.system(size: 11))
                         .foregroundStyle(AppTheme.inkTertiary)
                 }
+                .lineLimit(1)
 
-                if let flightLookupError {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(flightLookupError)
-                            .font(.system(size: 12))
-                    }
-                    .foregroundStyle(AppTheme.danger)
-                }
+                Spacer(minLength: 0)
             }
-            .padding(14)
-            .panelSurface(corner: 18)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
+    }
+
+    /// When the airline last answered. A boarding pass in a plan goes stale,
+    /// and a gate number from three weeks ago is worse than none.
+    @ViewBuilder
+    private func lastChecked(_ flight: FlightDetails) -> some View {
+        if let checked = flight.lastChecked {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                    .font(.system(size: 10.5, weight: .semibold))
+                Text("Checked \(DateFormatter.cached("d MMM, h:mm a").string(from: checked))")
+                    .font(.system(size: 11.5))
+            }
+            .foregroundStyle(AppTheme.inkTertiary)
+            .padding(.horizontal, 2)
         }
     }
 
@@ -529,7 +594,7 @@ struct ItineraryItemEditor: View {
 
         return Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { draft.split = mode }
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { adopt(mode) }
         } label: {
             VStack(spacing: 6) {
                 Image(systemName: mode.symbol)
@@ -558,11 +623,187 @@ struct ItineraryItemEditor: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Exact amounts
+
+    /// One field per person, and a running total against the cost.
+    ///
+    /// The other four modes are rules — say the rule, the arithmetic follows.
+    /// This one is the escape hatch for when there is no rule: three people ate
+    /// and one of them had the lobster. So it's the only split that needs an
+    /// editor rather than a button, and the only thing it really has to do is
+    /// make the discrepancy impossible to miss while you're creating it.
+    private var exactAmounts: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            label("What each person owes")
+
+            VStack(spacing: 0) {
+                ForEach(Array(chosenTravellers.enumerated()), id: \.element.id) { index, traveller in
+                    amountRow(traveller)
+                    if index < chosenTravellers.count - 1 { Hairline(inset: 14) }
+                }
+
+                Hairline(inset: 0)
+                tally
+            }
+            .panelSurface(corner: 18)
+
+            if chosenTravellers.count > 1 {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) { evenOut() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "equal.circle")
+                            .font(.system(size: 12.5, weight: .semibold))
+                        Text(assigned == 0 ? "Start from an even split" : "Even out the difference")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.leading, 2)
+                }
+                .buttonStyle(.plain)
+                .disabled(targetCost <= 0)
+                .opacity(targetCost > 0 ? 1 : 0.4)
+            }
+        }
+    }
+
+    private func amountRow(_ traveller: Traveller) -> some View {
+        HStack(spacing: 12) {
+            TravellerAvatar(traveller: traveller, size: 30)
+
+            Text(traveller.id == Traveller.you.id ? "\(traveller.name) (you)" : traveller.name)
+                .font(.system(size: 15))
+                .foregroundStyle(AppTheme.ink)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Text(Money.symbol(for: currencyCode))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppTheme.inkTertiary)
+
+            TextField(
+                "0",
+                text: Binding(
+                    get: {
+                        let amount = draft.customShares[traveller.id] ?? 0
+                        return amount > 0 ? String(format: amount == amount.rounded() ? "%.0f" : "%.2f", amount) : ""
+                    },
+                    set: { typed in
+                        let value = Double(typed.filter { $0.isNumber || $0 == "." }) ?? 0
+                        if value > 0 {
+                            draft.customShares[traveller.id] = value
+                        } else {
+                            draft.customShares.removeValue(forKey: traveller.id)
+                        }
+                    }
+                )
+            )
+            .font(.system(size: 16, weight: .semibold, design: .rounded))
+            .foregroundStyle(AppTheme.ink)
+            .keyboardType(.decimalPad)
+            .multilineTextAlignment(.trailing)
+            .frame(width: 92)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    /// The reconciliation line. Green when it balances, amber when it doesn't,
+    /// and it names the gap rather than just refusing to save.
+    private var tally: some View {
+        HStack(spacing: 8) {
+            Image(systemName: balances ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(balances ? AppTheme.positive : Palette.amber)
+                .contentTransition(.symbolEffect(.replace))
+
+            Text(tallyLine)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(balances ? AppTheme.inkSecondary : Palette.amber)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .animation(.easeOut(duration: 0.2), value: balances)
+    }
+
+    private var balances: Bool { targetCost <= 0 || abs(unassigned) < 0.01 }
+
+    private var tallyLine: String {
+        guard targetCost > 0 else { return "Set a cost first, then divide it up." }
+        if balances {
+            return "\(Money.format(assigned, code: currencyCode)) assigned — that's all of it."
+        }
+        if unassigned > 0 {
+            return "\(Money.format(unassigned, code: currencyCode)) still to assign."
+        }
+        return "\(Money.format(-unassigned, code: currencyCode)) over the cost."
+    }
+
+    /// Spreads whatever is unaccounted for across everyone evenly, or lays
+    /// down an even split when nothing has been typed yet. Rounding remainder
+    /// lands on the first person rather than quietly disappearing.
+    private func evenOut() {
+        let people = chosenTravellers
+        guard !people.isEmpty, targetCost > 0 else { return }
+
+        if assigned == 0 {
+            let each = (targetCost / Double(people.count) * 100).rounded() / 100
+            for person in people { draft.customShares[person.id] = each }
+        } else {
+            let each = (unassigned / Double(people.count) * 100).rounded() / 100
+            for person in people {
+                draft.customShares[person.id] = max(0, (draft.customShares[person.id] ?? 0) + each)
+            }
+        }
+
+        let drift = targetCost - chosenTravellers.reduce(0) { $0 + (draft.customShares[$1.id] ?? 0) }
+        if abs(drift) >= 0.01, let first = people.first {
+            draft.customShares[first.id] = max(0, (draft.customShares[first.id] ?? 0) + drift)
+        }
+    }
+
+    /// Switching mode, and squaring the booking with what the new mode means.
+    ///
+    /// "One person" against a set of five is not a state the mode can
+    /// represent, and leaving it that way meant `bearers` silently picked
+    /// whoever happened to sort first. Narrowing on the way in — to the payer
+    /// if we know one, otherwise to you — makes the choice visible and
+    /// correctable rather than arbitrary.
+    private func adopt(_ mode: SplitMode) {
+        draft.split = mode
+
+        switch mode {
+        case .individual:
+            let existing = chosenTravellers
+            if existing.count != 1 {
+                let chosen = draft.paidByID.flatMap { id in travellers.first { $0.id == id } }
+                    ?? travellers.first { $0.id == Traveller.you.id }
+                    ?? travellers.first
+                draft.participantIDs = chosen.map { [$0.id] } ?? []
+            }
+
+        case .custom:
+            // An empty set means "everyone" elsewhere, but there's nothing to
+            // type an amount against until it's spelled out.
+            if draft.participantIDs.isEmpty {
+                draft.participantIDs = Set(travellers.map(\.id))
+            }
+
+        default:
+            break
+        }
+    }
+
     // MARK: - Participants
 
     /// A row, not a chip wall.
     ///
-    /// The wall carried selection in a tint and a desaturated memoji, which
+    /// The wall carried selection in a tint and a desaturated avatar, which
     /// nobody reads as on or off, and eight people wrapped onto four rows that
     /// pushed the split rule and the save bar off screen. The row states who's
     /// on it and what they each owe in one line; the sheet behind it uses real
@@ -601,8 +842,10 @@ struct ItineraryItemEditor: View {
         switch draft.split {
         case .equal:
             return travellers
-        case .participants, .room:
+        case .participants:
             return chosenTravellers
+        case .custom:
+            return chosenTravellers.filter { (draft.customShares[$0.id] ?? 0) > 0 }
         case .organiser, .individual:
             return chosenTravellers.isEmpty ? [] : [chosenTravellers[0]]
         }
@@ -611,6 +854,10 @@ struct ItineraryItemEditor: View {
     /// What one person pays, which is the number the row and the sheet both
     /// show — and the thing the editor never used to state at all.
     private var shareEach: Double? {
+        // Nil under exact amounts: there is no "each" — that's the point of
+        // the mode — and showing the average against every name would be a
+        // number nobody owes.
+        guard !draft.split.isCustom else { return nil }
         let cost = Double(costText) ?? 0
         guard cost > 0, !bearers.isEmpty else { return nil }
         return cost / Double(bearers.count)
@@ -628,7 +875,7 @@ struct ItineraryItemEditor: View {
             } label: {
                 HStack(spacing: 12) {
                     if let payer = paidBy {
-                        MemojiAvatar(traveller: payer, size: 34)
+                        TravellerAvatar(traveller: payer, size: 34)
                     } else {
                         SymbolBadge(symbol: "creditcard", tint: AppTheme.accent, size: 34)
                     }
@@ -682,6 +929,8 @@ struct ItineraryItemEditor: View {
         guard cost > 0 else { return nil }
 
         switch draft.split {
+        case .custom:
+            return nil
         case .organiser, .individual:
             return "\(draft.split.label) — nobody else is charged for this."
         default:
@@ -693,10 +942,10 @@ struct ItineraryItemEditor: View {
 
     // MARK: - Actions
 
-    private func deleteButton(_ action: @escaping () -> Void) -> some View {
+    private var deleteButton: some View {
         Button {
-            action()
-            dismiss()
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            confirmingDelete = true
         } label: {
             Text("Remove booking")
                 .font(.system(size: 15, weight: .semibold))
@@ -712,6 +961,16 @@ struct ItineraryItemEditor: View {
         Button {
             draft.cost = max(0, Double(costText) ?? 0)
             draft.title = draft.title.trimmingCharacters(in: .whitespaces)
+            draft.vendor = draft.vendor.trimmingCharacters(in: .whitespaces)
+
+            // Amounts typed under "exact" and then abandoned for another mode
+            // would otherwise sit in the row waiting to reappear the next time
+            // somebody picks it, describing a cost that has since changed.
+            if !draft.split.isCustom {
+                draft.customShares = [:]
+            } else {
+                draft.customShares = draft.customShares.filter { draft.participantIDs.contains($0.key) }
+            }
 
             let trimmedFlightNumber = flightNumberText.trimmingCharacters(in: .whitespaces)
             if draft.kind == .flight, !trimmedFlightNumber.isEmpty {
@@ -729,6 +988,13 @@ struct ItineraryItemEditor: View {
             // booking is already saved rather than making the user wait on it.
             let saved = draft
             onSave(saved)
+            GlassToastCenter.shared.show(.init(
+                symbol: "checkmark.circle.fill",
+                tint: AppTheme.positive,
+                title: isNew ? "Booking added" : "Booking updated",
+                subtitle: "\"\(saved.title)\" is saved.",
+                duration: .seconds(3)
+            ))
             Task {
                 if let symbol = await ActivityIconSuggester.symbol(for: saved.title, kind: saved.kind),
                    symbol != saved.suggestedSymbol {

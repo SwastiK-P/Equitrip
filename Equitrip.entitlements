@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The container the app publishes its widget snapshot into. Both this
+	     file and EquitripWidgets.entitlements have to name the same group, and
+	     the group itself has to exist on the App ID — Xcode's Signing &
+	     Capabilities tab creates it when the App Groups capability is added. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.swastik.Equitrip</string>
+	</array>
+</dict>
+</plist>

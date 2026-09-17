@@ -17,10 +17,12 @@ import Foundation
 enum StructuredRowParser {
 
     static func items(in day: ItineraryDocument.DaySection) -> [PlannedItem] {
-        day.lines.compactMap { item(from: $0, on: day.date ?? Date()) }
+        day.lines.enumerated().compactMap { index, line in
+            item(from: line, on: day.date ?? Date(), hint: day.hint(at: index))
+        }
     }
 
-    private static func item(from line: String, on date: Date) -> PlannedItem? {
+    private static func item(from line: String, on date: Date, hint: ExtractedKind?) -> PlannedItem? {
         var rest = line
 
         // Time first, because it's the row's leading column and stripping it
@@ -53,7 +55,10 @@ enum StructuredRowParser {
             detail: split.detail,
             day: date,
             minuteOfDay: minuteOfDay,
-            kind: ItineraryReasoner.classify(title: split.title, detail: split.detail) ?? .other,
+            // The row's own words first, then what the table it sat under
+            // said, and only then a shrug. A hotel row is a hotel's name and
+            // nothing else, so the heading is the only thing that knows.
+            kind: ItineraryReasoner.classify(title: split.title, detail: split.detail) ?? hint ?? .other,
             amount: amount,
             participantCount: participants,
             photoQuery: ""
@@ -63,7 +68,7 @@ enum StructuredRowParser {
     /// Itinerary rows are "name, then everything else". Without a delimiter to
     /// go on, the first few words are the name — which is the same guess a
     /// person makes reading the table, and it fails the same way.
-    private static func splitTitle(_ text: String) -> (title: String, detail: String) {
+    static func splitTitle(_ text: String) -> (title: String, detail: String) {
         for delimiter in [" — ", " – ", " - ", ": ", " | "] {
             guard let range = text.range(of: delimiter) else { continue }
             return (
@@ -77,10 +82,37 @@ enum StructuredRowParser {
 
         // Three words is the length of nearly every row name in a real
         // itinerary: "Airport transfer", "Palace of Versailles", "Seine cruise".
-        let head = words.prefix(3).joined(separator: " ")
-        let tail = words.dropFirst(3).joined(separator: " ")
+        // But a fixed cut lands mid-phrase often enough to matter — "Agra Fort
+        // +", "India Gate Guided" — so the edge is walked forward off a word
+        // that can't end a name, and over the noun a name is usually built on.
+        var cut = 3
+        while cut < words.count, cut < 6, joiners.contains(words[cut - 1].lowercased()) {
+            cut += 1
+        }
+        if cut < words.count, cut < 6,
+           typeNouns.contains(words[cut].lowercased().trimmingCharacters(in: .punctuationCharacters)) {
+            cut += 1
+        }
+
+        let head = words.prefix(cut).joined(separator: " ")
+        let tail = words.dropFirst(cut).joined(separator: " ")
         return (head, tail)
     }
+
+    /// Words a booking's name never ends on.
+    private static let joiners: Set<String> = [
+        "+", "&", "and", "at", "of", "to", "the", "a", "an", "in", "on",
+        "for", "with", "via", "-", "–", "—", "→"
+    ]
+
+    /// The noun a booking's name is usually built on, worth one more word to
+    /// reach: "India Gate Guided **Tour**".
+    private static let typeNouns: Set<String> = [
+        "tour", "tours", "train", "flight", "transfer", "museum", "cruise",
+        "temple", "fort", "palace", "market", "experience", "tasting", "show",
+        "walk", "visit", "safari", "trek", "class", "workshop", "gallery",
+        "cathedral", "basilica", "garden", "park", "beach", "check-in", "checkin"
+    ]
 
     private static func trailingCount(in line: String) -> Int {
         guard let range = line.range(of: "\\b(\\d{1,2})\\s*$", options: .regularExpression),

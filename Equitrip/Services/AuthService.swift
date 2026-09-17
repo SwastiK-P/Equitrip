@@ -72,10 +72,36 @@ final class AuthService {
         session = try? await client.auth.session
     }
 
+    /// "You" only means something once we know who that is on both sides:
+    /// the display name for the UI, and the real `profiles.id` for anything
+    /// that talks to Supabase. Every participant chip, message and
+    /// `is_trip_member` check downstream reads this, so it has to finish
+    /// before Home appears — a chat message sent under the wrong id fails
+    /// its foreign key silently, which is a much worse debugging experience
+    /// than a brief wait there.
+    ///
+    /// Lives here rather than in `ContentView` because it is not only the
+    /// launch screen that needs it: a watch answering a settlement can wake
+    /// the app in the background with no view on screen at all, and the
+    /// answer has to go out under the right id all the same.
+    func bindIdentity() async {
+        CurrentUser.adopt(displayName)
+        CurrentUser.adoptEmail(email)
+        if let id = try? await SupabaseRepository.shared.resolveProfile() {
+            CurrentUser.adoptID(id)
+            if let face = SupabaseRepository.shared.currentAvatar {
+                CurrentUser.adoptAvatar(asset: Traveller.artwork(for: face.asset), url: face.url)
+            }
+        }
+    }
+
     func signOut() async {
         try? await client.auth.signOut()
         session = nil
         forgetIdentity()
+        // The widgets and the watch both hold a copy of the last account's
+        // balance, and neither can find out on its own that it's gone.
+        WidgetPublisher.clear()
     }
 
     /// Drops every trace of who was signed in.
