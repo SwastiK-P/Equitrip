@@ -321,6 +321,17 @@ private struct TripMapCard: View {
     /// round, with the map carrying on behind and beside it.
     private var floats: Bool { pane.isRegular }
 
+    /// Rounded along the top on a phone, all round when it floats.
+    private var shape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: corner,
+            bottomLeadingRadius: floats ? corner : 0,
+            bottomTrailingRadius: floats ? corner : 0,
+            topTrailingRadius: corner,
+            style: .continuous
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if !floats { grabber }
@@ -329,16 +340,16 @@ private struct TripMapCard: View {
             openButton
         }
         .frame(maxWidth: floats ? 380 : .infinity)
-        .glassEffect(
-            .regular,
-            in: UnevenRoundedRectangle(
-                topLeadingRadius: corner,
-                bottomLeadingRadius: floats ? corner : 0,
-                bottomTrailingRadius: floats ? corner : 0,
-                topTrailingRadius: corner,
-                style: .continuous
-            )
-        )
+        // A wash of the card colour between the glass and the content. Plain
+        // `.regular` glass over a bright map (a cyan sea, a green coast) let
+        // so much of it through that the small grey type on top had to compete
+        // with whatever happened to be underneath; this mutes the map without
+        // sealing it off, so the panel still refracts and still reads as a
+        // layer over somewhere rather than a card.
+        .background {
+            shape.fill(AppTheme.card.opacity(0.62))
+        }
+        .glassEffect(.regular, in: shape)
         .overlay(alignment: .topTrailing) { closeButton }
         .padding(.top, floats ? 18 : 0)
     }

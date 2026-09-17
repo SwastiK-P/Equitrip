@@ -21,25 +21,6 @@ final class WatchBridge: NSObject {
 
     static let shared = WatchBridge()
 
-    /// The store the signed-in UI is using. Weak: the bridge outlives every
-    /// screen and must not keep a signed-out account's trips alive.
-    private weak var store: TripStore?
-
-    /// Called by `RootTabView` once its store is wired up. A headless store
-    /// left over from a background launch is dropped here — from now on the
-    /// UI's store is the one with the live data and the realtime channel.
-    func attach(_ store: TripStore) {
-        self.store = store
-        headless = nil
-    }
-
-    /// A store of our own, for when the watch wakes the app in the background
-    /// and there is no UI — and so no `RootTabView` store — to borrow. Held
-    /// with its notifier and audit trail because the store references both
-    /// weakly, and a write whose notification quietly doesn't send is the
-    /// failure this whole path exists to avoid.
-    private var headless: (store: TripStore, notifications: NotificationStore, audit: AuditTrail)?
-
     private var session: WCSession? { WCSession.isSupported() ? .default : nil }
 
     // MARK: - Lifecycle
@@ -100,7 +81,9 @@ final class WatchBridge: NSObject {
     /// to pending, `trips` changes, the snapshot republishes, and the request
     /// reappears on the watch by itself.
     private func respond(to settlementID: UUID, in tripID: UUID, confirm: Bool) async -> WatchReply {
-        guard let store = await storeForWriting() else {
+        // The UI's store when there is one, a headless one otherwise — see
+        // `AppContext`, which Siri and Shortcuts share this path with.
+        guard let store = await AppContext.shared.store() else {
             return .rejected(reason: "Open Equitrip on your iPhone and sign in.")
         }
 
@@ -120,30 +103,6 @@ final class WatchBridge: NSObject {
 
         store.respondToSettlement(settlement, with: confirm ? .confirmed : .declined, in: tripID)
         return .accepted
-    }
-
-    /// The UI's store when there is one; otherwise a headless one, signed in
-    /// from the persisted session and synced fresh for this answer.
-    private func storeForWriting() async -> TripStore? {
-        if let store { return store }
-
-        let auth = AuthService.shared
-        if !auth.isSignedIn {
-            await auth.restore()
-            guard auth.isSignedIn else { return nil }
-            await auth.bindIdentity()
-        }
-
-        let context = headless ?? {
-            let context = (store: TripStore(), notifications: NotificationStore(), audit: AuditTrail())
-            context.store.notifier = context.notifications
-            context.store.auditor = context.audit
-            return context
-        }()
-        headless = context
-
-        await context.store.sync()
-        return context.store
     }
 
     /// Runs a command inside a background task. The watch can wake the app

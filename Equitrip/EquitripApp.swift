@@ -14,6 +14,16 @@ struct EquitripApp: App {
         // background with no scene, and only a session activated at launch
         // is there to hear it.
         WatchBridge.shared.activate()
+
+        // The Itinerary/Ledger toggle is the app's one segmented control —
+        // global appearance is safe rather than incidental. Colours match
+        // the same selected/unselected pair every button on the CTA uses,
+        // so the native glass control reads as this app's, not iOS's default.
+        let selected = UIColor(AppTheme.ctaLabel)
+        let unselected = UIColor(AppTheme.inkSecondary)
+        UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(AppTheme.cta)
+        UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: selected], for: .selected)
+        UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: unselected], for: .normal)
     }
 
     var body: some Scene {

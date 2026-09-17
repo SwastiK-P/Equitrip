@@ -315,6 +315,7 @@ struct TripLedger: View {
                             LedgerRow(item: item, trip: trip)
                         }
                         .buttonStyle(PressableButtonStyle())
+                        .bookingRowEntity(item.id)
 
                         if index < inlineVisible.count - 1 { Hairline(inset: 16) }
                     }
@@ -550,6 +551,7 @@ private struct ExpensesListView: View {
                             LedgerRow(item: item, trip: trip)
                         }
                         .buttonStyle(PressableButtonStyle())
+                        .bookingRowEntity(item.id)
 
                         if index < visible.count - 1 { Hairline(inset: 16) }
                     }

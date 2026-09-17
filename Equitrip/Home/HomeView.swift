@@ -47,7 +47,6 @@ struct HomeView: View {
     /// place instead of inferring from a column of booleans.
     @State private var sheet: Sheet?
     @State private var cover: Cover?
-
     private enum Sheet: Identifiable {
         case notifications
         case profile
@@ -79,11 +78,14 @@ struct HomeView: View {
     private enum Cover: Identifiable {
         case chat(Trip)
         case newTrip
+        /// A receipt, from capture to a filled-in quick add, for this trip.
+        case receipt(Trip)
 
         var id: String {
             switch self {
             case .chat(let trip): "chat-\(trip.id)"
             case .newTrip: "new-trip"
+            case .receipt(let trip): "receipt-\(trip.id)"
             }
         }
     }
@@ -199,7 +201,10 @@ struct HomeView: View {
                     travellers: trip.travellers,
                     currencyCode: trip.currencyCode,
                     day: day,
-                    onSave: { store.addItem($0, to: trip.id) },
+                    onSave: {
+                        SiriDonations.expenseLogged($0, on: trip.id, in: store)
+                        store.addItem($0, to: trip.id)
+                    },
                     // Home has no itinerary stack to hand off to, so the full
                     // editor opens over it in the same place. Sequenced rather
                     // than swapped, because changing the item under a live
@@ -238,6 +243,22 @@ struct HomeView: View {
                 NewTripFlow { draft in
                     store.add(draft.makeTrip())
                 }
+
+            case .receipt(let trip):
+                ReceiptScanFlow(
+                    trip: trip,
+                    onSave: {
+                        SiriDonations.expenseLogged($0, on: trip.id, in: store)
+                        store.addItem($0, to: trip.id)
+                    },
+                    onSwitchToDetailed: { partial in
+                        cover = nil
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(420))
+                            sheet = .detailedAdd(trip, partial)
+                        }
+                    }
+                )
             }
         }
         .onAppear {
@@ -676,8 +697,8 @@ struct HomeView: View {
                         if let trip = liveTrip {
                             sheet = .quickAdd(trip, Calendar.current.startOfDay(for: Date()))
                         }
-                    case "Payment":
-                        onSettleUp()
+                    case "Receipt":
+                        if let trip = receiptTrip { cover = .receipt(trip) }
                     default:
                         break
                     }
@@ -718,12 +739,25 @@ struct HomeView: View {
         store.trips.first { $0.phase == .live }
     }
 
-    /// Both of these belong to a trip, so they're dimmed until there's one to
-    /// belong to — Chat to any trip, Expense to one that's under way.
+    /// The trip a scanned receipt is filed against: the one under way, or
+    /// else the next one.
+    ///
+    /// Looser than `liveTrip` on purpose. Quick add stamps *now* onto what it
+    /// creates; a receipt carries its own date, and the ones that arrive
+    /// before a trip starts — the hotel deposit, the ferry tickets bought at
+    /// the counter a week early — are receipts all the same.
+    private var receiptTrip: Trip? {
+        liveTrip ?? store.currentTrip
+    }
+
+    /// All three of these belong to a trip, so they're dimmed until there's
+    /// one to belong to — Chat and Receipt to any trip, Expense to one that's
+    /// under way.
     private func isEnabled(_ action: QuickAction) -> Bool {
         switch action.title {
         case "Chat": store.currentTrip != nil
         case "Expense": liveTrip != nil
+        case "Receipt": receiptTrip != nil
         default: true
         }
     }
@@ -819,423 +853,4 @@ struct HomeView: View {
             }
         }
     }
-}
-
-// MARK: - Current trip card
-
-/// The one trip Home leads with.
-///
-/// Everything that was on it is still on it — where the trip is up to, whether
-/// it's running, how far through it is, who's on it, what's booked, what it's
-/// costing and where you stand. What changed is that those stopped being seven
-/// things stacked in a column and became three bands, each answering one
-/// question: *what is this*, *how far in are we*, *where do I stand*.
-///
-/// The photograph carries the identity and nothing else. It used to hold the
-/// title over a plain dark gradient, which on a bright sky — and half of these
-/// are skies — left the trip's own name the least legible text on the card.
-/// It's a progressive blur now, the same one the trip banner uses, so the
-/// picture stays a picture and the type stays readable over it.
-private struct CurrentTripCard: View {
-    @Environment(\.tripStore) private var store
-    @Environment(\.pane) private var pane
-    let trip: Trip
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            cover
-            progress
-            Hairline()
-            standing
-        }
-        .background(AppTheme.card, in: .rect(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(AppTheme.cardStroke.opacity(0.05))
-        }
-        .shadow(color: AppTheme.softShadow(.light), radius: 14, y: 6)
-    }
-
-    // MARK: Cover
-
-    private var cover: some View {
-        DestinationImage(
-            query: trip.destination,
-            photo: trip.cover,
-            fallbackSymbol: trip.symbol,
-            fallbackTint: trip.tint,
-            onResolve: { store.setCover($0, for: trip.id) }
-        )
-        // Taller as the card widens: a 152pt strip across a 600pt column is
-        // a letterbox, and the photograph is the only thing on this card that
-        // says which trip it is.
-        .frame(height: pane.scaled(152, wide: 200, regular: 216))
-        .frame(maxWidth: .infinity)
-        // Later and lighter than the trip banner's. That one is 268pt tall, so
-        // a ramp starting at 44% still leaves most of the photograph alone —
-        // on a 152pt cover the same numbers eat the picture.
-        .overlay { ProgressiveBlur(edge: .bottom, begins: 0.54, scrim: 0.30) }
-        // Only for an upcoming trip: a live one already says "Happening now"
-        // in the section header above, so a second "In progress" badge here
-        // was repeating itself.
-        .overlay(alignment: .topLeading) {
-            if trip.phase != .live { phaseChip }
-        }
-        .overlay(alignment: .bottomLeading) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(trip.title)
-                    .font(AppTheme.display(22))
-                    .foregroundStyle(.white)
-
-                Text("\(trip.dateRange) · \(trip.travellers.count.pluralised("traveller"))")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
-            }
-            .lineLimit(1)
-            .shadow(color: .black.opacity(0.3), radius: 6, y: 1)
-            .padding(14)
-        }
-        .clipShape(.rect(topLeadingRadius: 24, topTrailingRadius: 24, style: .continuous))
-    }
-
-    /// On the photograph rather than in the body. It's a property of the trip,
-    /// not a number about it, and it was taking a whole row to say two words.
-    private var phaseChip: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(trip.phase.tint)
-                .frame(width: 5, height: 5)
-
-            Text(trip.phase.label)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.3), in: .capsule)
-        .background(.ultraThinMaterial, in: .capsule)
-        .padding(12)
-    }
-
-    // MARK: Progress
-
-    /// How far in, and how much is on it. The two belong on one line: the
-    /// bar underneath is about elapsed days, and "3 bookings · ₹2,540" is what
-    /// those days are made of.
-    private var progress: some View {
-        VStack(spacing: 9) {
-            HStack(spacing: 8) {
-                Text(trip.progressLabel)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
-
-                Spacer(minLength: 6)
-
-                Text("\(trip.bookingCount.pluralised("booking")) · \(trip.projectedLabel)")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(AppTheme.inkTertiary)
-            }
-            .lineLimit(1)
-
-            ProgressTrack(value: trip.progress, tint: trip.tint, cells: trip.dayCount)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 14)
-    }
-
-    // MARK: Standing
-
-    /// Who's on it, and where you stand — the reason to open the app at all,
-    /// so it gets the last word and the largest type on the card.
-    private var standing: some View {
-        HStack(alignment: .center, spacing: 10) {
-            AvatarStack(travellers: trip.travellers, size: 28, max: 5, departedIDs: trip.departedIDs)
-
-            Spacer(minLength: 4)
-
-            // Before the trip starts there is no balance to report — see
-            // `Trip.showsBalance`. What it'll cost you is the figure that
-            // means something at that point.
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(trip.showsBalance ? trip.netLabel : Money.format(trip.yourShare, code: trip.currencyCode))
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundStyle(trip.showsBalance ? trip.netTone : AppTheme.ink)
-
-                Text(trip.showsBalance ? trip.netCaption : "your share")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(AppTheme.inkTertiary)
-            }
-            .lineLimit(1)
-            .fixedSize()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
-    }
-}
-
-/// The affordance that stops an empty or short trip list from being a dead end.
-private struct NewTripCard: View {
-    @Environment(\.pane) private var pane
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 12) {
-                Image(systemName: "plus")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(AppTheme.accent)
-                    .frame(width: 52, height: 52)
-                    .contentShape(.circle)
-                    // See `quickActions` — interactive glass inside a button
-                    // eats the button's tap.
-                    .glassEffect(.regular, in: .circle)
-
-                VStack(spacing: 2) {
-                    Text("New trip")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(AppTheme.ink)
-                    Text("Import a PDF or\nadd it yourself")
-                        .font(.system(size: 12))
-                        .foregroundStyle(AppTheme.inkSecondary)
-                        .multilineTextAlignment(.center)
-                }
-            }
-            // A fixed 164pt on a phone, where it sits beside nothing and
-            // shouldn't stretch to the full margin; the width of its column on
-            // iPad, where a small dashed box floating in a wide empty lane
-            // reads as a rendering fault rather than as an invitation.
-            .frame(maxWidth: pane.isRegular ? .infinity : 164)
-            .frame(maxHeight: .infinity)
-            .padding(.vertical, pane.isRegular ? 34 : 24)
-            .background {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(
-                        AppTheme.cardStroke.opacity(0.16),
-                        style: StrokeStyle(lineWidth: 1.5, dash: [7, 6])
-                    )
-            }
-        }
-        .buttonStyle(PressableButtonStyle())
-    }
-}
-
-/// Segmented progress: equal-width capsules rather than one continuous fill.
-///
-/// One cell per day of the trip, so the bar and the "Day 2 of 5" label above
-/// it are visibly counting the same thing — a continuous fill made you
-/// estimate the same number the label states exactly. Kept local because the
-/// only other bar in the app (the hero split) is a two-tone variant of a
-/// different thing.
-private struct ProgressTrack: View {
-    let value: Double
-    let tint: Color
-    /// Days on the trip. `dayCount` is already at least 1, but this clamps
-    /// anyway rather than trusting a caller not to hand over an empty range.
-    let cells: Int
-
-    private var count: Int { max(1, cells) }
-
-    /// Rounded up: any progress at all lights the first cell, because a bar
-    /// showing nothing on a trip that has started reads as broken.
-    private var filled: Int {
-        let clamped = min(1, max(0, value))
-        guard clamped > 0 else { return 0 }
-        return min(count, max(1, Int((Double(count) * clamped).rounded(.up))))
-    }
-
-    var body: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<count, id: \.self) { index in
-                Capsule()
-                    .fill(index < filled ? tint : AppTheme.cardStroke.opacity(0.08))
-                    // Equal share of the row each, so the cells stay identical
-                    // at any card width without measuring anything.
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .frame(height: 6)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: filled)
-    }
-}
-
-// MARK: - Itinerary row
-
-private struct ItineraryRow: View {
-    let item: ItineraryItem
-    let trip: Trip?
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(spacing: 0) {
-                if let clock = item.clock {
-                    Text(clock.value)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(AppTheme.ink)
-                    Text(clock.meridiem)
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(AppTheme.inkTertiary)
-                } else {
-                    Text("All\nday")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(AppTheme.inkTertiary)
-                        .multilineTextAlignment(.center)
-                }
-            }
-            .fixedSize()
-            .frame(width: 44)
-
-            SymbolBadge(symbol: item.symbol, tint: item.kind.tint, size: 34)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
-                Text(subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(AppTheme.inkSecondary)
-            }
-            .lineLimit(1)
-            .layoutPriority(1)
-
-            Spacer(minLength: 4)
-
-            if let trip {
-                // Who the cost actually lands on — see the note on the same
-                // switch in `TimelineRow` — not just whoever was tagged when
-                // the booking was made.
-                AvatarStack(travellers: trip.bearers(of: item), size: 22, max: 3, departedIDs: trip.departedIDs)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
-    }
-
-    /// Vendor when there is one, otherwise how the cost is being shared —
-    /// which is the next most useful thing to know about a booking.
-    private var subtitle: String {
-        let money = item.cost > 0 && trip != nil
-            ? Money.format(item.cost, code: trip!.currencyCode)
-            : nil
-
-        let lead = item.vendor.isEmpty ? item.split.label : item.vendor
-        guard let money else { return lead }
-        return "\(lead) · \(money)"
-    }
-}
-
-// MARK: - Activity row
-
-private struct ActivityRow: View {
-    let item: AppNotification
-
-    var body: some View {
-        HStack(spacing: 12) {
-            SymbolBadge(symbol: item.kind.symbol, tint: item.kind.tint, size: 36)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.system(size: 13.5, weight: item.isUnread ? .semibold : .regular))
-                    .foregroundStyle(AppTheme.ink)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(item.body.isEmpty ? item.time : "\(item.body) · \(item.time)")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(AppTheme.inkTertiary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .layoutPriority(1)
-
-            Spacer(minLength: 6)
-
-            if item.isUnread {
-                Circle()
-                    .fill(AppTheme.accent)
-                    .frame(width: 7, height: 7)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
-    }
-}
-
-// MARK: - Pending settlements
-
-/// The card the brief calls "pops up at the top": somebody says they paid
-/// you, and it's the first thing to see after your own name — ahead of the
-/// balance it's about to change, because it's the one thing on this screen
-/// that's actually asking you something.
-private struct PendingSettlementsCard: View {
-    let entries: [(trip: Trip, settlement: Settlement)]
-    var onOpen: (Settlement) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 6) {
-                Image(systemName: "bell.badge.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(AppTheme.accent)
-
-                Text(entries.count == 1 ? "Someone paid you" : "\(entries.count) payments to confirm")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(AppTheme.accent)
-            }
-
-            VStack(spacing: 0) {
-                ForEach(Array(entries.enumerated()), id: \.element.settlement.id) { index, entry in
-                    Button { onOpen(entry.settlement) } label: {
-                        row(entry)
-                    }
-                    .buttonStyle(PressableButtonStyle())
-
-                    if index < entries.count - 1 { Hairline(inset: 16) }
-                }
-            }
-            .cardSurface(corner: 20)
-        }
-    }
-
-    private func row(_ entry: (trip: Trip, settlement: Settlement)) -> some View {
-        let payer = entry.trip.traveller(entry.settlement.fromID)
-
-        return HStack(spacing: 12) {
-            if let payer {
-                TravellerAvatar(traveller: payer, size: 38)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(payer?.name ?? "Someone") paid you \(Money.format(entry.settlement.amount, code: entry.settlement.currencyCode))")
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("\(entry.trip.title) · \(entry.settlement.method.label)")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(AppTheme.inkTertiary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 6)
-
-            Text("Review")
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(AppTheme.ctaLabel)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
-                .background(AppTheme.cta, in: .capsule)
-        }
-        .padding(13)
-    }
-}
-
-#Preview("Light") {
-    RootTabView(userName: "Swastik Patil")
-}
-
-#Preview("Dark") {
-    RootTabView(userName: "Swastik Patil")
-        .preferredColorScheme(.dark)
 }

@@ -106,6 +106,7 @@ enum WidgetPublisher {
             netLabel: net == 0 ? "Settled" : glance(net, code: trip.currencyCode, signed: true),
             netCaption: caption(for: net),
             net: net,
+            showsBalance: trip.showsBalance,
             startDate: trip.startDate,
             dayCount: trip.dayCount,
             travellerCount: trip.travellers.count,

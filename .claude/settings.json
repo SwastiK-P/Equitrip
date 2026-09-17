@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(scripts/build.sh)",
+      "Bash(scripts/build.sh:*)",
+      "Bash(scripts/run.sh)",
+      "Bash(scripts/run.sh:*)",
+      "Bash(scripts/codemap.py)",
+      "Bash(scripts/codemap.py:*)"
+    ],
+    "deny": [
+      "Read(./build/dd/**)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/codemap.py\" --quiet"
+          }
+        ]
+      }
+    ]
+  }
+}

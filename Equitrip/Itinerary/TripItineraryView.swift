@@ -39,6 +39,10 @@ struct TripItineraryView: View {
     @State private var detailedAdd: ItineraryItem?
     @State private var showTravellers = false
     @State private var showShare = false
+    @State private var showChat = false
+    /// Words to open the chat with, when Siri drafted them. See `AppNavigator`.
+    @State private var chatDraft = ""
+    @State private var navigator = AppNavigator.shared
     /// Who is being taken off the trip, when the leave flow is open.
     @State private var leaving: Traveller?
     /// A proposal being answered, and a closed exit being read. Two sheets
@@ -47,7 +51,6 @@ struct TripItineraryView: View {
     /// The cover photograph's own colour, which the iPad trip sheet is washed
     /// in. Nil until it's been sampled; the sheet falls back to the trip tint.
     @State private var coverTint: Color?
-    @Namespace private var pillSpace
     @State private var reviewingDeparture: TripDeparture?
     @State private var viewingStatement: TripDeparture?
 
@@ -60,6 +63,18 @@ struct TripItineraryView: View {
     enum Scope: Hashable { case group, mine }
 
     private var trip: Trip? { store.trip(tripID) }
+
+    /// Opens whatever `AppNavigator` was asked to open on this trip.
+    private func takeFocus() {
+        guard let trip, let focus = navigator.takeFocus(for: trip.id) else { return }
+        switch focus {
+        case .booking(let itemID):
+            viewingItem = trip.items.first { $0.id == itemID }
+        case .chat(let draft):
+            chatDraft = draft ?? ""
+            showChat = true
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -135,6 +150,16 @@ struct TripItineraryView: View {
         .sheet(item: $viewingStatement) { departure in
             if let trip { DepartureStatementSheet(trip: trip, departure: departure) }
         }
+        .fullScreenCover(isPresented: $showChat, onDismiss: { chatDraft = "" }) {
+            if let trip { TripChatView(trip: trip, draft: chatDraft) }
+        }
+        // Siri, Spotlight and Visual Intelligence land on a trip and then ask
+        // for something on it: a booking, or the chat. Taken on arrival and on
+        // every request after, since this screen may already be showing.
+        .onAppear(perform: takeFocus)
+        .onChange(of: navigator.tripFocus?.id) { _, _ in takeFocus() }
+        // What's on screen, for "this" — see `OnscreenEntities`.
+        .onscreenTrip(trip)
         .sheet(isPresented: $showShare) {
             if let trip { TripInviteSheet(trip: trip) }
         }
@@ -225,7 +250,10 @@ struct TripItineraryView: View {
                     travellers: trip.travellers,
                     currencyCode: trip.currencyCode,
                     day: addDay(for: trip),
-                    onSave: { store.addItem($0, to: trip.id) },
+                    onSave: {
+                        SiriDonations.expenseLogged($0, on: trip.id, in: store)
+                        store.addItem($0, to: trip.id)
+                    },
                     onSwitchToDetailed: { partial in
                         quickAdd = nil
                         Task { @MainActor in
@@ -274,10 +302,12 @@ struct TripItineraryView: View {
                 banner(for: trip)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    GlassSegments(
-                        options: [(Section.timeline, "Timeline"), (Section.ledger, "Ledger")],
-                        selection: $section
-                    )
+                    Picker("Section", selection: $section) {
+                        Text("Timeline").tag(Section.timeline)
+                        Text("Ledger").tag(Section.ledger)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(height: 42)
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
 
@@ -460,6 +490,12 @@ struct TripItineraryView: View {
 
                 Spacer(minLength: 0)
 
+                CircleGlyphButton(symbol: "bubble.left.and.bubble.right", size: 44) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showChat = true
+                }
+                .accessibilityLabel("Trip chat")
+
                 CircleGlyphButton(symbol: "person.badge.plus", size: 44) {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     showShare = true
@@ -590,7 +626,6 @@ struct TripItineraryView: View {
                 valueTint: unpaid == 0 ? AppTheme.ink : Palette.amberDeep
             )
             TripSummaryRow(symbol: "banknote", label: "Currency", value: trip.currencyCode)
-            TripSummaryRow(symbol: "number", label: "Invite code", value: Trip.formatCode(trip.inviteCode))
         }
         .padding(16)
         .glassEffect(.regular, in: .rect(cornerRadius: 22, style: .continuous))
@@ -648,8 +683,13 @@ struct TripItineraryView: View {
                 .minimumScaleFactor(0.75)
 
             HStack(spacing: 8) {
-                PillTab(value: Section.timeline, title: "Itinerary", selection: $section, namespace: pillSpace)
-                PillTab(value: Section.ledger, title: "Ledger", selection: $section, namespace: pillSpace)
+                Picker("Section", selection: $section) {
+                    Text("Itinerary").tag(Section.timeline)
+                    Text("Ledger").tag(Section.ledger)
+                }
+                .pickerStyle(.segmented)
+                .frame(height: 42)
+                .fixedSize()
 
                 Spacer(minLength: 12)
 
@@ -698,6 +738,7 @@ struct TripItineraryView: View {
 
                         Button { viewingItem = item } label: { row }
                             .buttonStyle(PressableButtonStyle())
+                            .bookingRowEntity(item.id)
                     }
                     .transition(.opacity.combined(with: .move(edge: .top)))
 
@@ -968,6 +1009,12 @@ struct TripItineraryView: View {
 
     private var actionCluster: some View {
         HStack(spacing: 0) {
+            clusterButton(symbol: "bubble.left.and.bubble.right", label: "Trip chat") {
+                showChat = true
+            }
+
+            clusterDivider
+
             clusterButton(symbol: "person.badge.plus", label: "Invite people") {
                 showShare = true
             }

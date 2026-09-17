@@ -123,4 +123,18 @@ struct AvatarPalette {
     static func at(_ index: Int) -> AvatarPalette { all[index % all.count] }
 }
 
+// MARK: - Stored tints
 
+/// Maps a hex stored in Postgres back onto the palette colour it came from.
+extension Palette {
+    static func tint(forHex hex: String) -> Color {
+        switch hex.uppercased() {
+        case "D97706": Palette.amber
+        case "2F6FED": Palette.blue
+        case "7C4DE0": Palette.violet
+        case "0E7490": Palette.teal
+        case "1E7A55": Palette.green
+        default: AppTheme.accent
+        }
+    }
+}

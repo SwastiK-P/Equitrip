@@ -155,6 +155,94 @@ struct WidgetSymbolBadge: View {
     }
 }
 
+// MARK: - Initial avatar
+
+/// A person as a widget can draw them: an initial on a tinted disc.
+///
+/// The snapshot carries names, not photos — a widget has no session to fetch
+/// a profile picture with. The tint is picked from the name's scalars rather
+/// than `hashValue`, which Swift reseeds every launch and would repaint the
+/// same person a different colour on each timeline reload.
+struct InitialAvatar: View {
+    let name: String
+    var size: CGFloat = 28
+    /// A canvas-coloured ring, for avatars that overlap in a stack.
+    var ringed = false
+
+    private static let palette: [Color] = [Brand.blue, Brand.violet, Brand.teal, Brand.amber, Brand.green, Brand.indigo]
+
+    private var tint: Color {
+        let seed = name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
+        return Self.palette[abs(seed) % Self.palette.count]
+    }
+
+    private var initial: String {
+        name.trimmingCharacters(in: .whitespaces).first.map { String($0).uppercased() } ?? "?"
+    }
+
+    var body: some View {
+        Text(initial)
+            .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
+            .foregroundStyle(tint)
+            .frame(width: size, height: size)
+            // Opaque card under the tint, so an avatar stacked over another
+            // hides it instead of letting the one behind show through.
+            .background {
+                ZStack {
+                    Circle().fill(Brand.card)
+                    Circle().fill(tint.opacity(0.16))
+                }
+            }
+            .overlay {
+                if ringed { Circle().strokeBorder(Brand.canvasTop, lineWidth: 2) }
+            }
+    }
+}
+
+// MARK: - Day track
+
+/// One cell per day of a trip, lit up to today — Home's `ProgressTrack` at
+/// widget scale, so "Day 3 of 6" and the bar beside it count the same thing.
+///
+/// Capped at fourteen cells: a month-long trip at widget width is thirty
+/// slivers too thin to read, and past that point the cells stop being days
+/// and become a proportion anyway.
+struct DayTrack: View {
+    let progress: Double
+    let days: Int
+    var tint: Color = Brand.accent
+    var height: CGFloat = 5
+
+    private var count: Int { min(14, max(1, days)) }
+
+    private var filled: Int {
+        let clamped = min(1, max(0, progress))
+        guard clamped > 0 else { return 0 }
+        return min(count, max(1, Int((Double(count) * clamped).rounded(.up))))
+    }
+
+    var body: some View {
+        HStack(spacing: 2.5) {
+            ForEach(0..<count, id: \.self) { index in
+                Capsule()
+                    .fill(index < filled ? tint : Brand.cardStroke.opacity(0.10))
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: height)
+    }
+}
+
+// MARK: - Hairline
+
+struct WidgetHairline: View {
+    var body: some View {
+        Rectangle()
+            .fill(Brand.cardStroke.opacity(0.08))
+            .frame(height: 1)
+    }
+}
+
 // MARK: - Clock gutter
 
 /// `4:30` over `PM`, right-aligned in a fixed gutter, so a column of rows

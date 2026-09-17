@@ -20,6 +20,7 @@ final class MediaStore {
     /// dashboard: Storage → New bucket → public.
     static let avatarBucket = "avatars"
     static let receiptBucket = "receipts"
+    static let chatBucket = "chat-media"
 
     enum StoreError: LocalizedError {
         case tooLarge
@@ -66,6 +67,13 @@ final class MediaStore {
     /// moved), just attached to a settlement id instead of an item id.
     func uploadSettlementProof(_ data: Data, for settlementID: UUID) async throws -> URL {
         try await upload(data, path: "settlement-\(settlementID.uuidString).jpg", bucket: Self.receiptBucket)
+    }
+
+    /// Stores a photo sent in a trip's group chat. Foldered by trip so a
+    /// trip's media can be found — and cleared — together. The bucket is
+    /// created by `0017_chat_components.sql`, not the dashboard.
+    func uploadChatPhoto(_ data: Data, messageID: UUID, tripID: UUID) async throws -> URL {
+        try await upload(data, path: "\(tripID.uuidString)/\(messageID.uuidString).jpg", bucket: Self.chatBucket)
     }
 
     /// One path per owner, so replacing an image overwrites rather than

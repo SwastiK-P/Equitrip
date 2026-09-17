@@ -70,6 +70,8 @@ struct RootTabView: View {
     /// and because the sync has to survive a tab switch mid-read.
     @State private var detections = DetectedExpenseStore()
     @State private var gmailSync: GmailExpenseSync?
+    /// Requests from outside the view tree. See `consumeNavigation`.
+    @State private var navigator = AppNavigator.shared
 
     var body: some View {
         TabView(selection: $selection) {
@@ -83,6 +85,8 @@ struct RootTabView: View {
                         // told explicitly rather than trusting deinit to
                         // catch a socket an `async let` still has open.
                         store.stopSettlementRealtime()
+                        AppContext.shared.reset()
+                        SpotlightIndex.clear()
                         onSignOut()
                     },
                     onOpenTrip: { trip in
@@ -90,6 +94,7 @@ struct RootTabView: View {
                         // than pushing a second copy of the timeline here.
                         store.open(trip)
                         selection = .itinerary
+                        SiriDonations.tripOpened(trip)
                     },
                     onShowAllTrips: {
                         store.itineraryPath = []
@@ -193,7 +198,7 @@ struct RootTabView: View {
             store.notifier = notifications
             store.auditor = audit
             store.toaster = toasts
-            WatchBridge.shared.attach(store)
+            AppContext.shared.attach(store)
             // A toast is a summary; tapping it should always land on the full
             // review — for a request that's yours to answer, and for a
             // response to a request you raised, which just wants you looking
@@ -217,6 +222,10 @@ struct RootTabView: View {
             // After the trips land, not before: the sync needs to know whether
             // one is actually running, and asks the store to find out.
             gmailSync?.sync(for: liveTrip)
+
+            // A Siri or Spotlight request that launched the app is usually
+            // about a trip, and was waiting for exactly this.
+            consumeNavigation()
         }
         .onChange(of: scenePhase) { _, phase in
             // Coming back to the app is the moment worth re-reading: the
@@ -232,6 +241,10 @@ struct RootTabView: View {
         }
         .onChange(of: store.trips.count) { _, _ in
             gmailSync?.sync(for: liveTrip)
+            consumeNavigation()
+        }
+        .onChange(of: navigator.request?.id) { _, id in
+            if id != nil { consumeNavigation() }
         }
         .onReceive(NotificationCenter.default.publisher(for: ControlRoutes.posted)) { _ in
             consumePendingControlRoute()
@@ -298,6 +311,33 @@ struct RootTabView: View {
         case .equi: selection = .equi
         case nil: break
         }
+    }
+
+    /// Acts on a request left by Siri, Spotlight or a Shortcut — see
+    /// `AppNavigator`. A request about a trip that hasn't loaded yet is put
+    /// back rather than dropped, and tried again when the trips arrive.
+    private func consumeNavigation() {
+        guard let destination = navigator.takeRequest() else { return }
+
+        let tripID: UUID
+        switch destination {
+        case .trip(let id): tripID = id
+        // The trip screen takes its own part once it's showing this trip: it
+        // owns the booking sheet and the chat cover.
+        case .booking(let id, let itemID):
+            tripID = id
+            navigator.focus(.booking(itemID), on: id)
+        case .chat(let id, let draft):
+            tripID = id
+            navigator.focus(.chat(draft: draft), on: id)
+        }
+
+        guard let trip = store.trip(tripID) else {
+            if store.state.isLoading { navigator.deferRequest(destination) }
+            return
+        }
+        store.open(trip)
+        selection = .itinerary
     }
 
     /// Quick add belongs to Home, because it belongs to a trip and Home is

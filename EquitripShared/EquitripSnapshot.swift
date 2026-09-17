@@ -126,6 +126,13 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
         var netLabel: String
         var netCaption: String
         var net: Double
+        /// `Trip.showsBalance`, carried over rather than re-derived: a widget
+        /// has no booking list to check `paidByID` against, only the figures
+        /// already rolled up here. False means `netLabel` would be a lie
+        /// ("Settled" before anyone's paid for anything) — show
+        /// `yourShareLabel` instead. Optional for the same cross-build reason
+        /// as `settleRequests`; nil keeps the old behaviour of showing `net`.
+        var showsBalance: Bool?
 
         // For the watch's trip card, which draws the same one-cell-per-day
         // progress track as Home and needs the days to count and to number.
@@ -204,21 +211,8 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
 
     /// What the widgets draw before the app has ever published anything —
     /// on a fresh install, or in the gallery preview.
-    static let placeholder = EquitripSnapshot(
-        generatedAt: .now,
-        currencyCode: "INR",
-        owedToYou: 4_820,
-        youOwe: 1_640,
-        owedToYouLabel: "₹4,820",
-        youOweLabel: "₹1,640",
-        netLabel: "+₹3,180",
-        netCompactLabel: "+₹3.2k",
-        netCaption: "you get back",
-        scopeCaption: "You're ahead across 2 active trips",
-        activeTripCount: 2,
-        scopeTitle: nil,
-        scopeTripID: nil,
-        currentTrip: TripSummary(
+    static let placeholder: EquitripSnapshot = {
+        let goa = TripSummary(
             id: UUID(),
             title: "Goa Reset",
             destination: "Goa, India",
@@ -229,37 +223,105 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
             netLabel: "+₹2,140",
             netCaption: "you get back",
             net: 2_140,
+            showsBalance: true,
             startDate: Calendar.current.date(byAdding: .day, value: -2, to: .now),
             dayCount: 6,
             travellerCount: 4,
-            yourShareLabel: "₹18,400"
-        ),
-        upNext: [
-            Event(id: UUID(), title: "Sunset kayak", vendor: "Palolem Beach",
-                  symbol: "figure.hiking", kind: "activity", date: .now,
-                  clockValue: "4:30", clockMeridiem: "PM",
-                  costLabel: "₹3,200", shareLabel: "₹800 each", isToday: true,
-                  costCompactLabel: "₹3.2k", shareAmountLabel: "₹800", detail: "Palolem Beach"),
-            Event(id: UUID(), title: "Dinner at Gunpowder", vendor: "Assagao",
-                  symbol: "fork.knife", kind: "meal", date: .now,
-                  clockValue: "8:00", clockMeridiem: "PM",
-                  costLabel: "₹4,600", shareLabel: "₹1,150 each", isToday: true,
-                  costCompactLabel: "₹4.6k", shareAmountLabel: "₹1,150", detail: "3 of us"),
-            Event(id: UUID(), title: "Check out", vendor: "Villa Kalinga",
-                  symbol: "bed.double.fill", kind: "stay", date: .now,
-                  clockValue: "11:00", clockMeridiem: "AM",
-                  costLabel: nil, shareLabel: nil, isToday: false,
-                  detail: "Villa Kalinga")
-        ],
-        settleRequests: [
-            SettleRequest(id: UUID(), tripID: UUID(), tripTitle: "Goa Reset",
-                          fromName: "Priya", amountLabel: "₹800",
-                          methodLabel: "UPI", methodSymbol: "indianrupeesign.circle",
-                          note: "Kayak share", createdAt: .now)
-        ],
-        hasTrips: true,
-        balanceIsMeaningful: true
-    )
+            yourShareLabel: "₹18,400",
+            symbol: "beach.umbrella.fill"
+        )
+
+        // Not yet under way — nobody's paid for anything, so the figure
+        // worth showing is what it'll cost, not a "Settled" that isn't true.
+        let manali = TripSummary(
+            id: UUID(),
+            title: "Manali Loop",
+            destination: "Manali, India",
+            progressLabel: "In 3 weeks",
+            progress: 0,
+            dateRange: "2–8 Apr",
+            phase: .upcoming,
+            netLabel: "Settled",
+            netCaption: "all square",
+            net: 0,
+            showsBalance: false,
+            startDate: Calendar.current.date(byAdding: .day, value: 21, to: .now),
+            dayCount: 7,
+            travellerCount: 5,
+            yourShareLabel: "₹9,600",
+            symbol: "mountain.2.fill"
+        )
+
+        let kerala = TripSummary(
+            id: UUID(),
+            title: "Kerala Backwaters",
+            destination: "Alleppey, India",
+            progressLabel: "In 2 months",
+            progress: 0,
+            dateRange: "14–19 May",
+            phase: .upcoming,
+            netLabel: "Settled",
+            netCaption: "all square",
+            net: 0,
+            showsBalance: false,
+            startDate: Calendar.current.date(byAdding: .day, value: 60, to: .now),
+            dayCount: 6,
+            travellerCount: 3,
+            yourShareLabel: "₹14,200",
+            symbol: "sailboat.fill"
+        )
+
+        return EquitripSnapshot(
+            generatedAt: .now,
+            currencyCode: "INR",
+            owedToYou: 4_820,
+            youOwe: 1_640,
+            owedToYouLabel: "₹4,820",
+            youOweLabel: "₹1,640",
+            netLabel: "+₹3,180",
+            netCompactLabel: "+₹3.2k",
+            netCaption: "you get back",
+            scopeCaption: "You're ahead across 2 active trips",
+            activeTripCount: 2,
+            scopeTitle: nil,
+            scopeTripID: nil,
+            currentTrip: goa,
+            upNext: [
+                Event(id: UUID(), title: "Sunset kayak", vendor: "Palolem Beach",
+                      symbol: "figure.hiking", kind: "activity", date: .now,
+                      clockValue: "4:30", clockMeridiem: "PM",
+                      costLabel: "₹3,200", shareLabel: "₹800 each", isToday: true,
+                      costCompactLabel: "₹3.2k", shareAmountLabel: "₹800", detail: "Palolem Beach"),
+                Event(id: UUID(), title: "Dinner at Gunpowder", vendor: "Assagao",
+                      symbol: "fork.knife", kind: "meal", date: .now,
+                      clockValue: "8:00", clockMeridiem: "PM",
+                      costLabel: "₹4,600", shareLabel: "₹1,150 each", isToday: true,
+                      costCompactLabel: "₹4.6k", shareAmountLabel: "₹1,150", detail: "3 of us"),
+                Event(id: UUID(), title: "Check out", vendor: "Villa Kalinga",
+                      symbol: "bed.double.fill", kind: "stay", date: .now,
+                      clockValue: "11:00", clockMeridiem: "AM",
+                      costLabel: nil, shareLabel: nil, isToday: false,
+                      detail: "Villa Kalinga")
+            ],
+            allTrips: [goa, manali, kerala],
+            settleRequests: [
+                SettleRequest(id: UUID(), tripID: goa.id, tripTitle: "Goa Reset",
+                              fromName: "Priya", amountLabel: "₹800",
+                              methodLabel: "UPI", methodSymbol: "indianrupeesign.circle",
+                              note: "Kayak share", createdAt: .now),
+                SettleRequest(id: UUID(), tripID: goa.id, tripTitle: "Goa Reset",
+                              fromName: "Rohan", amountLabel: "₹1,150",
+                              methodLabel: "Cash", methodSymbol: "banknote",
+                              note: "Dinner", createdAt: .now.addingTimeInterval(-3_600)),
+                SettleRequest(id: UUID(), tripID: goa.id, tripTitle: "Goa Reset",
+                              fromName: "Ananya", amountLabel: "₹2,400",
+                              methodLabel: "Bank transfer", methodSymbol: "building.columns",
+                              note: "Villa deposit", createdAt: .now.addingTimeInterval(-7_200))
+            ],
+            hasTrips: true,
+            balanceIsMeaningful: true
+        )
+    }()
 
     /// A signed-in account with nothing on it. Distinct from `placeholder`:
     /// that one is a sales pitch, this is a real, empty state.

@@ -2,15 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Equitrip is a light-mode app: the peach canvas and the photo cards
-	     are designed for one appearance only, so the system never flips it. -->
-	<key>UIUserInterfaceStyle</key>
-	<string>Light</string>
-	<!-- Add-only: Settle's "Save QR" writes straight to Photos without ever
-	     reading the library back, so this is the only photo permission the
-	     app needs to ask for. -->
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Equitrip saves a UPI QR code to your photos when you tap Save QR.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -23,13 +14,6 @@
 				<string>equitrip</string>
 			</array>
 		</dict>
-		<!-- Google hands the OAuth code back on the app's own reversed client
-		     ID. Replace the string below with yours from the Google Cloud
-		     console — it is the client ID with its dot-parts reversed, e.g.
-		     com.googleusercontent.apps.123456789-abcdefg — and paste the
-		     client ID itself into GmailConfig.swift. Until both are done, the
-		     Expense detection row says the build isn't set up rather than
-		     opening a browser onto Google's "invalid client" page. -->
 		<dict>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
@@ -40,6 +24,12 @@
 				<string>com.googleusercontent.apps.1051629329168-1h41i6fme8gffggfpiirh6u1dh5j8v91</string>
 			</array>
 		</dict>
+	</array>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.swastik.Equitrip.viewTrip</string>
+		<string>com.swastik.Equitrip.viewBooking</string>
+		<string>com.swastik.Equitrip.viewChat</string>
 	</array>
 </dict>
 </plist>

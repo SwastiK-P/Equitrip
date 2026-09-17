@@ -106,54 +106,6 @@ struct TripSummaryRow: View {
     }
 }
 
-// MARK: - Pill tab
-
-/// A single tab in a row of pills: solid when selected, a soft grey lozenge
-/// when not. Lighter than `GlassSegments`, which is a single control with a
-/// sliding thumb — at iPad widths a stretched segmented control reads as a
-/// progress bar.
-struct PillTab<Value: Hashable>: View {
-    let value: Value
-    let title: String
-    var count: Int?
-    @Binding var selection: Value
-    var namespace: Namespace.ID
-
-    var body: some View {
-        let on = selection == value
-
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) { selection = value }
-        } label: {
-            HStack(spacing: 6) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-
-                if let count {
-                    Text("\(count)")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .opacity(0.6)
-                }
-            }
-            .foregroundStyle(on ? AppTheme.ctaLabel : AppTheme.inkSecondary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background {
-                if on {
-                    Capsule()
-                        .fill(AppTheme.cta)
-                        .matchedGeometryEffect(id: "pill", in: namespace)
-                } else {
-                    Capsule().fill(AppTheme.cardStroke.opacity(0.06))
-                }
-            }
-            .contentShape(.capsule)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Cost bar
 
 /// The trip's money, floating at the foot of the plan with the one thing you'd

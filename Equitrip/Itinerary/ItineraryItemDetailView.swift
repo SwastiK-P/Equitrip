@@ -107,6 +107,8 @@ struct ItineraryItemDetailView: View {
         }
         .presentationDragIndicator(.hidden)
         .presentationBackground { CanvasBackground() }
+        // "Who paid for this?" — see `OnscreenEntities`.
+        .onscreenBooking(item)
         .sheet(isPresented: $showParticipants) {
             ParticipantPickerSheet(
                 travellers: trip.travellers,

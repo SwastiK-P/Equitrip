@@ -33,6 +33,7 @@ struct ProfileSheet: View {
     @State private var showUPISettings = false
     @State private var showNotificationSettings = false
     @State private var showGmailSettings = false
+    @State private var showSiri = false
     /// Observed so the row's value line follows a connection made inside the
     /// sub-sheet without the profile screen being re-presented.
     @State private var gmail = GmailAccount.shared
@@ -98,6 +99,9 @@ struct ProfileSheet: View {
         }
         .sheet(isPresented: $showGmailSettings) {
             GmailSettingsSheet()
+        }
+        .sheet(isPresented: $showSiri) {
+            SiriSettingsSheet()
         }
         .sheet(item: $exported) { file in
             ShareSheet(items: [file.url])
@@ -267,6 +271,8 @@ struct ProfileSheet: View {
 
             VStack(spacing: 0) {
                 gmailRow
+                Hairline(inset: 16)
+                settingsRow(symbol: "waveform", title: "Siri", value: "What to say") { showSiri = true }
             }
             .cardSurface(corner: 22)
         }

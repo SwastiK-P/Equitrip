@@ -299,6 +299,10 @@ private struct TabAlignedHeader<Header: View>: ViewModifier {
 
     /// The safe area as the screen sees it — status bar plus any tab bar.
     @State private var viewInset: CGFloat = 0
+    /// The window's own inset: the status bar, without the tab bar's share.
+    /// Stored from the geometry action rather than read from UIKit in `body`,
+    /// where asking for a window's insets mid-update can stall the screen.
+    @State private var windowInset: CGFloat = 0
     @State private var headerHeight: CGFloat = 0
 
     private var tabBar: CGFloat { viewInset - windowInset }
@@ -328,17 +332,26 @@ private struct TabAlignedHeader<Header: View>: ViewModifier {
             // back into the inset it was computed from.
             .background {
                 Color.clear
-                    .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { viewInset = $0 }
+                    .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: {
+                        windowInset = UIApplication.keyWindowTopInset ?? $0
+                        viewInset = $0
+                    }
             }
     }
+}
 
-    /// The window's own inset: the status bar, without the tab bar's share.
-    private var windowInset: CGFloat {
-        UIApplication.shared.connectedScenes
+extension UIApplication {
+    /// The key window's top safe area — the status bar alone, without the
+    /// share a floating iPad tab bar adds to every screen's inset. Anything
+    /// that wants to sit on the tab bar's line measures from here — from a
+    /// geometry action, not from `body`, where reading a window's insets can
+    /// stall the SwiftUI update that's asking.
+    static var keyWindowTopInset: CGFloat? {
+        shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
             .first(where: \.isKeyWindow)?
-            .safeAreaInsets.top ?? viewInset
+            .safeAreaInsets.top
     }
 }
 

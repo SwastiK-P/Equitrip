@@ -11,6 +11,8 @@ struct EquitripWidgetBundle: WidgetBundle {
     var body: some Widget {
         BalanceWidget()
         TimelineWidget()
+        SettleWidget()
+        TripsWidget()
         AddExpenseControl()
         AskEquiControl()
     }
