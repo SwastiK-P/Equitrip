@@ -396,6 +396,28 @@ struct TripParticipantsStage: View {
         appeared = true
         guard rows.isEmpty else { return }
 
+        // Anybody already on the draft is already a row.
+        //
+        // This screen is now part of the hand-built route too, which means it
+        // can be arrived at twice: add two friends, continue, then go back to
+        // fix a date and come forward again. The rows are `@State` and die
+        // with the screen, so a second visit started empty — and `commit`
+        // writes the roster it can see, which would have been just you. The
+        // two friends were dropped without a word.
+        let existing = draft.travellers.filter {
+            $0.id != Traveller.you.id && !($0.email ?? "").isEmpty
+        }
+
+        guard existing.isEmpty else {
+            rows = existing.map { person in
+                Row(
+                    email: person.email ?? "",
+                    state: person.isRegistered ? .member(person) : .invited(person)
+                )
+            }
+            return
+        }
+
         // Someone the document did name still has to become a real person, so
         // their address is what's missing, not their name.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { entryFocused = true }

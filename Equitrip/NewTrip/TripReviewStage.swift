@@ -20,18 +20,26 @@ struct TripReviewStage: View {
     @State private var showTravellerPicker = false
     @State private var showLocationPicker = false
     @State private var showImageSource = false
+    @State private var showDates = false
+    @State private var showCurrencyPicker = false
     @State private var isEditingTitle = false
     /// What the consistency check has found so far, and how far it has got.
     /// Derived from the bookings on every change and never stored — a warning
     /// that outlived the booking it was about would be the worse bug.
     @State private var issues: [ItineraryIssue] = []
     @State private var checkState: ItineraryCheckState = .checking
-    @FocusState private var titleFocused: Bool
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 cover
+
+                // The span and the currency, which this screen used not to
+                // show at all: you could set dates on the previous step, come
+                // here to "check it over", and find the one thing you'd just
+                // typed nowhere on the page. Both rows edit in place, because
+                // a review that can only be read is a receipt.
+                essentials
 
                 if draft.wasImported { importNote }
 
@@ -49,16 +57,13 @@ struct TripReviewStage: View {
 
                 travellers
 
-                // The manual route already chose this on the basics screen;
-                // an imported trip never passed through it.
-                if draft.wasImported {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Customize")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(AppTheme.inkSecondary)
-                        TripTitleStylePicker(title: draft.title, selection: $draft.titleStyle)
-                    }
-                }
+                // Shown on both routes now. It used to be here only for
+                // imported trips, on the grounds that the hand-built route had
+                // already chosen a typeface on its form — which put a styling
+                // decision in the middle of the questions a trip can't exist
+                // without, and left the people who imported a document
+                // choosing it here anyway.
+                titleStyle
 
                 bookings
                 totals
@@ -74,6 +79,12 @@ struct TripReviewStage: View {
         .safeAreaInset(edge: .bottom) { createBar }
         .sheet(isPresented: $showTravellerPicker) {
             TravellerPickerSheet(travellers: $draft.travellers)
+        }
+        .sheet(isPresented: $showDates) {
+            DateRangeSheet(start: $draft.startDate, end: $draft.endDate)
+        }
+        .sheet(isPresented: $showCurrencyPicker) {
+            CurrencyPickerSheet(selection: $draft.currencyCode)
         }
         .sheet(isPresented: $showLocationPicker) {
             LocationPickerSheet(initial: draft.destination) { picked in
@@ -214,83 +225,105 @@ struct TripReviewStage: View {
 
     // MARK: - Cover
 
+    /// The same card the first step builds, so the trip you named on the way
+    /// in is the thing you check on the way out — and everything on it is
+    /// still editable here, which for an imported trip is the only chance
+    /// anybody gets to correct what the reader made of it.
     private var cover: some View {
-        DestinationImage(
-            query: draft.coverQuery,
-            photo: draft.cover,
-            fallbackSymbol: draft.inferredSymbol,
-            fallbackTint: draft.inferredTint,
-            onResolve: { draft.cover = $0 }
+        TripCoverCard(
+            draft: $draft,
+            height: 190,
+            onChangePhoto: { showImageSource = true },
+            onChangeDestination: { showLocationPicker = true },
+            isEditingTitle: $isEditingTitle
         )
-        .frame(height: 168)
-        .frame(maxWidth: .infinity)
-        .overlay(alignment: .bottomLeading) {
-            VStack(alignment: .leading, spacing: 3) {
-                Group {
-                    if isEditingTitle {
-                        TextField("Untitled trip", text: $draft.title)
-                            .focused($titleFocused)
-                            .submitLabel(.done)
-                            .onSubmit { isEditingTitle = false }
-                            .tint(.white)
-                    } else {
-                        Text(draft.title.isEmpty ? "Untitled trip" : draft.title)
-                            .tripTitle(draft.titleStyle, size: 23)
-                            .onTapGesture {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                isEditingTitle = true
-                                titleFocused = true
-                            }
-                    }
-                }
-                .font(.system(size: 23, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+    }
 
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    showLocationPicker = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(draft.destination.isEmpty ? "No destination set" : draft.destination)
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundStyle(.white.opacity(0.9))
-                }
-                .buttonStyle(.plain)
+    // MARK: - Essentials
+
+    /// When the trip runs and what it's counted in.
+    ///
+    /// Both are facts the rest of this screen quietly depends on — every
+    /// booking's day is checked against the span, every figure below is
+    /// printed in the currency — and neither was visible here before.
+    private var essentials: some View {
+        VStack(spacing: 0) {
+            essentialRow(
+                symbol: "calendar",
+                label: spanLabel,
+                value: draft.dayCount.pluralised("day")
+            ) {
+                showDates = true
             }
-            .lineLimit(1)
-            .shadow(color: .black.opacity(0.45), radius: 6, y: 1)
-            .padding(16)
-        }
-        .overlay(alignment: .bottom) {
-            LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom)
-                .frame(height: 96)
-                .allowsHitTesting(false)
-        }
-        .overlay(alignment: .topTrailing) {
-            Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                showImageSource = true
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "photo.on.rectangle.angled")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("Change")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.black.opacity(0.4), in: .capsule)
-                .padding(10)
+
+            Hairline(inset: 16)
+
+            essentialRow(
+                symbol: "banknote",
+                label: "Settled in",
+                value: "\(Money.symbol(for: draft.currencyCode))  \(draft.currencyCode)"
+            ) {
+                showCurrencyPicker = true
             }
-            .buttonStyle(.plain)
         }
-        .clipShape(.rect(cornerRadius: 24, style: .continuous))
-        .onChange(of: titleFocused) { _, focused in
-            if !focused { isEditingTitle = false }
+        .cardSurface(corner: 20)
+    }
+
+    /// "Sun 20 Sep → Wed 23 Sep", or one date when the trip is a single day.
+    private var spanLabel: String {
+        let format = DateFormatter.cached("EEE d MMM")
+        let from = format.string(from: draft.startDate)
+        guard draft.dayCount > 1 else { return from }
+        return "\(from) → \(format.string(from: draft.endDate))"
+    }
+
+    private func essentialRow(
+        symbol: String,
+        label: String,
+        value: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(AppTheme.inkTertiary)
+                    .frame(width: 18)
+
+                Text(label)
+                    .font(.system(size: 14.5, weight: .medium))
+                    .foregroundStyle(AppTheme.ink)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Text(value)
+                    .font(.system(size: 13.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppTheme.inkSecondary)
+                    .contentTransition(.numericText())
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(AppTheme.inkTertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(.rect)
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+
+    // MARK: - Style
+
+    /// The typeface the trip's name is set in, previewed on the cover above as
+    /// it's picked.
+    private var titleStyle: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(title: "Title style", caption: draft.titleStyle.name)
+            TripTitleStylePicker(title: draft.title, selection: $draft.titleStyle)
         }
     }
 

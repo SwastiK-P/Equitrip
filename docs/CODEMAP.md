@@ -6,7 +6,7 @@
 
 ## Equitrip — iOS app
 
-222 files, 60k lines.
+226 files, 60k lines.
 
 **(root)**
 - `ContentView.swift` (0.1k) — ContentView
@@ -43,6 +43,8 @@
 - `Buttons.swift` (0.2k) — PressableButtonStyle, PrimaryButton, TextButton, CircleGlyphButton, NotificationBellButton, GlassCircleButton
 - `CodeSlotsField.swift` (0.1k) — CodeSlotsField — One box per character of an invite code.
 - `CurrencyPickerSheet.swift` (0.2k) — CurrencyPickerSheet, CurrencyOption, CurrencyRow — Picking the currency a trip is settled in.
+- `DateRangeCalendar.swift` (0.2k) — DateRangeCalendar — A scrolling calendar that picks both ends of a trip at once.
+- `DateRangeSheet.swift` (0.1k) — DateRangeSheet, DateSpan — `DateRangeCalendar` as a sheet, for the screens that already exist and only need the dates corrected — the re…
 - `DestinationImage.swift` (0.1k) — DestinationImage — A photograph of a place, with a designed fallback.
 - `EquitripField.swift` (0.1k) — EquitripField, ShakeEffect — Labelled field with an animated focus ring, matching the card surfaces.
 - `GlassForm.swift` (0.2k) — PanelSurface, GlassField, GlassRow, TravellerChip, FlowLayout
@@ -186,12 +188,14 @@
 - `JoinTripFlow.swift` (0.4k) — JoinTripFlow — Joining someone else's trip.
 - `NewTripFlow.swift` (0.6k) — NewTripFlow — Creating a trip, both ways in.
 - `QuickAddSheet.swift` (0.5k) — QuickAddSheet — Logging something that just happened.
-- `TripBasicsStage.swift` (0.5k) — TripBasicsStage — The manual route: the handful of facts a trip can't exist without.
+- `TripCoverCard.swift` (0.2k) — TripCoverCard — The trip as an object you can touch: its photograph, its name and where it's going, in one card.
+- `TripDatesStage.swift` (0.1k) — TripDatesStage — Step two: when.
 - `TripImportStage.swift` (0.6k) — TripImportStage — Picks a PDF and watches the document being read.
 - `TripInvitationSheet.swift` (0.2k) — TripInvitationsCard, TripInvitationSheet — An invitation, opened.
 - `TripParticipantsStage.swift` (0.5k) — TripParticipantsStage — "Your document says four people.
+- `TripPlaceStage.swift` (0.4k) — TripPlaceStage — Step one of building a trip by hand: where.
 - `TripPreview.swift` (0.3k) — TripPreview — A trip you're not on yet, and the decision about whether to be.
-- `TripReviewStage.swift` (0.5k) — TripReviewStage — The last stop before a trip becomes the group's shared record.
+- `TripReviewStage.swift` (0.6k) — TripReviewStage — The last stop before a trip becomes the group's shared record.
 
 **Onboarding/**
 - `BookingsShowcase.swift` (0.3k) — BookingsShowcase — Onboarding's second page: booking PDFs read into the itinerary on device.
