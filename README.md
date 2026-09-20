@@ -7,9 +7,9 @@
 Group travel, planned and paid for together.
 
 ![Swift 5](https://img.shields.io/badge/Swift%205-F05138?style=flat&logo=swift&logoColor=white)
-![SwiftUI](https://img.shields.io/badge/SwiftUI-F05138?style=flat&logo=swift&logoColor=white)
-![iOS](https://img.shields.io/badge/iOS-F05138?style=flat&logo=apple&logoColor=white)
-![watchOS](https://img.shields.io/badge/watchOS-F05138?style=flat&logo=apple&logoColor=white)
+![SwiftUI](https://img.shields.io/badge/SwiftUI-0B84FF?style=flat&logo=swift&logoColor=white)
+![iOS](https://img.shields.io/badge/iOS-E5E5EA?style=flat&logo=apple&logoColor=000000)
+![watchOS](https://img.shields.io/badge/watchOS-E5E5EA?style=flat&logo=apple&logoColor=000000)
 
 <br>
 
@@ -84,11 +84,6 @@ Xcode 26 or later, and an iOS 27 simulator or device.
 ```bash
 ./scripts/run.sh "iPhone 18 Pro"    # build, install, launch
 ```
-
-> [!IMPORTANT]
-> `Services/*Config.swift` and `Gmail/GmailConfig.swift` hold live credentials.
-> Point them at your own Supabase project, aviationstack key, Unsplash
-> application and Google OAuth client, then apply `supabase/migrations/`.
 
 There is no test target: a change is verified by a clean build, and behaviour by
 running the app. Start at [`docs/CODEMAP.md`](docs/CODEMAP.md) — every file with
