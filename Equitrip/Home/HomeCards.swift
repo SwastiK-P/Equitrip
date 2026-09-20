@@ -85,7 +85,7 @@ struct CurrentTripCard: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(trip.title)
-                    .font(AppTheme.display(30))
+                    .tripTitle(trip.titleStyle, size: 30)
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -184,11 +184,10 @@ struct NewTripCard: View {
                         .multilineTextAlignment(.center)
                 }
             }
-            // A fixed 164pt on a phone, where it sits beside nothing and
-            // shouldn't stretch to the full margin; the width of its column on
-            // iPad, where a small dashed box floating in a wide empty lane
-            // reads as a rendering fault rather than as an invitation.
-            .frame(maxWidth: pane.isRegular ? .infinity : 164)
+            // Full width on phone and iPad alike — it's the only thing in the
+            // section when there's no current trip, so it should read as the
+            // section's content rather than a stray tile floating in it.
+            .frame(maxWidth: .infinity)
             .frame(maxHeight: .infinity)
             .padding(.vertical, pane.isRegular ? 34 : 24)
             .background {
@@ -300,13 +299,9 @@ struct ItineraryRow: View {
     /// Vendor when there is one, otherwise how the cost is being shared —
     /// which is the next most useful thing to know about a booking.
     private var subtitle: String {
-        let money = item.cost > 0 && trip != nil
-            ? Money.format(item.cost, code: trip!.currencyCode)
-            : nil
 
         let lead = item.vendor.isEmpty ? item.split.label : item.vendor
-        guard let money else { return lead }
-        return "\(lead) · \(money)"
+        return "\(lead)"
     }
 }
 
@@ -414,6 +409,117 @@ struct PendingSettlementsCard: View {
                 .background(AppTheme.cta, in: .capsule)
         }
         .padding(13)
+    }
+}
+
+// MARK: - Trip scope picker
+
+/// The "All trips" balance-scope dropdown's content.
+///
+/// A real dropdown rather than a `Menu`, so a row can look like the trip it
+/// stands for: a `Menu`'s `Label` icon is drawn by the OS as a small
+/// monochrome glyph with no room for a border or a tilt. Each cover gets a
+/// white polaroid frame and a slight, alternating rotation instead — the
+/// photo strip a `Menu` can't render.
+struct TripScopePickerMenu: View {
+    @Environment(\.dismiss) private var dismiss
+    let trips: [Trip]
+    @Binding var selection: UUID?
+
+    private let tilts: [Double] = [-4, 3, -3, 4]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 2) {
+                row(
+                    title: "All trips",
+                    subtitle: "Everything, one figure",
+                    query: nil,
+                    photo: nil,
+                    symbol: "square.stack.3d.up.fill",
+                    tint: AppTheme.accent,
+                    isSelected: selection == nil,
+                    tilt: tilts[0]
+                ) {
+                    selection = nil
+                }
+
+                if !trips.isEmpty { Divider().padding(.vertical, 2) }
+
+                ForEach(Array(trips.enumerated()), id: \.element.id) { index, trip in
+                    row(
+                        title: trip.title,
+                        subtitle: trip.dateRange,
+                        query: trip.destination,
+                        photo: trip.cover,
+                        symbol: trip.symbol,
+                        tint: trip.tint,
+                        isSelected: selection == trip.id,
+                        tilt: tilts[(index + 1) % tilts.count]
+                    ) {
+                        selection = trip.id
+                    }
+                }
+            }
+            .padding(8)
+        }
+        .scrollIndicators(.hidden)
+        .frame(width: 250)
+        .frame(maxHeight: 360)
+    }
+
+    private func row(
+        title: String,
+        subtitle: String,
+        query: String?,
+        photo: TripPhoto?,
+        symbol: String,
+        tint: Color,
+        isSelected: Bool,
+        tilt: Double,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+            dismiss()
+        } label: {
+            HStack(spacing: 12) {
+                DestinationImage(query: query, photo: photo, fallbackSymbol: symbol, fallbackTint: tint)
+                    .frame(width: 42, height: 42)
+                    .clipShape(.rect(cornerRadius: 10, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(.white, lineWidth: 3)
+                    }
+                    .shadow(color: .black.opacity(0.16), radius: 4, y: 2)
+                    .rotationEffect(.degrees(tilt))
+                    .padding(.vertical, 3)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AppTheme.ink)
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(AppTheme.inkTertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 6)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -14,8 +14,10 @@ import SwiftUI
 /// same thought.
 struct TripEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tripStore) private var store
 
     @State private var draft: Trip
+    @State private var leaving: Traveller?
     @State private var showTravellerPicker = false
     @State private var showLocationPicker = false
     @State private var showCurrencyPicker = false
@@ -34,6 +36,10 @@ struct TripEditorSheet: View {
         self.onSave = onSave
         self.onDelete = onDelete
     }
+
+    /// The trip as the store has it now. The roster is read from here rather
+    /// than the draft, so an invitation sent from this sheet shows up in it.
+    private var liveTrip: Trip { store.trip(draft.id) ?? draft }
 
     private var canSave: Bool {
         draft.title.trimmingCharacters(in: .whitespaces).count >= 2 && draft.endDate >= draft.startDate
@@ -55,6 +61,7 @@ struct TripEditorSheet: View {
                 dates
                 currency
                 travellers
+                customize
 
                 if onDelete != nil { deleteButton }
 
@@ -76,9 +83,31 @@ struct TripEditorSheet: View {
         }
         .sheet(isPresented: $showTravellerPicker) {
             TravellerPickerSheet(
-                travellers: $draft.travellers,
-                organiserIDs: $draft.organiserIDs
+                // The live roster, read-only. This used to be the draft's
+                // array, written back on save: adding an email put that person
+                // straight onto the ledger without an invitation, and removing
+                // someone deleted their membership with their payments still
+                // pointing at them. People now join by invitation and leave
+                // through the departure flow, the same as on the trip screen.
+                travellers: .constant(liveTrip.travellers),
+                organiserIDs: $draft.organiserIDs,
+                trip: liveTrip,
+                // Sequenced like the trip screen's: swapping one sheet for
+                // another while the first is still up makes SwiftUI juggle two
+                // presentations at once.
+                onLeave: { person in
+                    showTravellerPicker = false
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(320))
+                        leaving = person
+                    }
+                },
+                onInvite: { store.invite($0, to: draft.id) },
+                onCancelInvite: { store.cancelInvitation(of: $0.id, in: draft.id) }
             )
+        }
+        .sheet(item: $leaving) { person in
+            LeaveTripSheet(trip: liveTrip, traveller: person)
         }
         .sheet(isPresented: $showLocationPicker) {
             LocationPickerSheet(initial: draft.destination) { picked in
@@ -226,11 +255,13 @@ struct TripEditorSheet: View {
             fallbackTint: draft.tint,
             onResolve: { draft.cover = $0 }
         )
-        .frame(height: 120)
+        .frame(height: 200)
         .frame(maxWidth: .infinity)
         .overlay(alignment: .bottomLeading) {
             Text(draft.title.isEmpty ? "Untitled trip" : draft.title)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .tripTitle(draft.titleStyle, size: 22)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.45), radius: 6, y: 1)
                 .padding(14)
@@ -260,6 +291,14 @@ struct TripEditorSheet: View {
             .buttonStyle(.plain)
         }
         .clipShape(.rect(cornerRadius: 20, style: .continuous))
+    }
+
+    /// The typeface of the trip's name, shown on the cover above as it's picked.
+    private var customize: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            label("Customize")
+            TripTitleStylePicker(title: draft.title, selection: $draft.titleStyle)
+        }
     }
 
     private var destination: some View {
@@ -334,8 +373,8 @@ struct TripEditorSheet: View {
             label("Travellers")
 
             TravellerSummaryRow(
-                travellers: draft.travellers,
-                organisers: draft.organisers
+                travellers: liveTrip.travellers,
+                organisers: liveTrip.travellers.filter { draft.organiserIDs.contains($0.id) }
             ) {
                 showTravellerPicker = true
             }

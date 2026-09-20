@@ -111,6 +111,9 @@ enum WidgetPublisher {
             dayCount: trip.dayCount,
             travellerCount: trip.travellers.count,
             yourShareLabel: glance(trip.yourShare, code: trip.currencyCode),
+            titleStyle: trip.titleStyle.rawValue,
+            bookingLabel: trip.bookingCount.pluralised("booking"),
+            projectedLabel: trip.projectedLabel,
             coverURL: trip.cover.map { $0.thumbURL ?? $0.url },
             symbol: trip.symbol
         )
@@ -142,9 +145,57 @@ enum WidgetPublisher {
                 gate: item.flight?.departureGate,
                 costCompactLabel: item.cost > 0 ? compact(item.cost, code: trip.currencyCode, signed: false) : nil,
                 shareAmountLabel: share > 0 ? glance(share, code: trip.currencyCode) : nil,
-                detail: detail(of: item, in: trip)
+                detail: detail(of: item, in: trip),
+                kindLabel: item.kind.label,
+                paidBy: item.paidByID.flatMap(trip.traveller).map { person($0, you: you) },
+                paymentMethodLabel: item.paymentMethod?.label,
+                splitLabel: item.cost > 0 ? item.split.label : nil,
+                splitSymbol: item.cost > 0 ? item.split.symbol : nil,
+                eachLabel: eachLabel(of: item, in: trip),
+                participants: participants(of: item, in: trip, for: you),
+                isDisputed: item.isDisputed,
+                airline: resolved(item.flight)?.airlineName,
+                departureCity: resolved(item.flight)?.departureCity,
+                arrivalCity: resolved(item.flight)?.arrivalCity,
+                departureTimeLabel: resolved(item.flight)?.scheduledDeparture.map { clock($0) },
+                arrivalTimeLabel: resolved(item.flight)?.scheduledArrival.map { clock($0) },
+                flightStatus: resolved(item.flight)?.status?.label
             )
         }
+    }
+
+    /// A flight's looked-up details, only once a lookup has run — the same
+    /// test the phone's detail sheet makes before showing the ticket.
+    private static func resolved(_ flight: FlightDetails?) -> FlightDetails? {
+        flight.flatMap { $0.isResolved ? $0 : nil }
+    }
+
+    /// `6:30 AM` — the phone ticket card's own pattern.
+    private static func clock(_ date: Date) -> String {
+        DateFormatter.cached("h:mm a").string(from: date)
+    }
+
+    /// One figure for everybody, only when it is one figure: under any other
+    /// split the shares differ and "each" would be a lie about all but one.
+    /// Nothing for a party of one, where "each" just repeats the total.
+    private static func eachLabel(of item: ItineraryItem, in trip: Trip) -> String? {
+        let heads = trip.shares(of: item).count
+        guard item.cost > 0, item.split == .equal, heads > 1 else { return nil }
+        return "\(glance(Money.wholeShare(of: item.cost, heads: heads), code: trip.currencyCode)) each"
+    }
+
+    private static func participants(of item: ItineraryItem, in trip: Trip, for you: UUID) -> [EquitripSnapshot.Person] {
+        let people = trip.participants(of: item)
+        return (people.filter { $0.id == you } + people.filter { $0.id != you })
+            .map { person($0, you: you) }
+    }
+
+    private static func person(_ traveller: Traveller, you: UUID) -> EquitripSnapshot.Person {
+        .init(
+            name: traveller.id == you ? "You" : traveller.name,
+            avatar: Traveller.artwork(for: traveller.asset),
+            photoURL: traveller.avatarURL
+        )
     }
 
     /// The one line under a booking's name on the watch.

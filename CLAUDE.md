@@ -65,9 +65,10 @@ Outside: `EquitripShared/` (compiled into every target), `EquitripWidgets/`,
 
 ## Conventions
 
-- **Only Swift and `.xcassets` inside the four target folders.** They're Xcode synchronized folders: any
-  other file (`.md`, loose `.json`, scripts) is copied into the app bundle, and two with the same name fail the build
-  ("Multiple commands produce …"). Notes go in `.claude/rules/` or `docs/`.
+- **Only Swift and `.xcassets` inside the four target folders** — plus `AppIcon.icon` (Icon Composer) in the app and
+  watch folders, which `actool` compiles and which wins over the same-named `AppIcon.appiconset`. They're Xcode
+  synchronized folders: any other file (`.md`, loose `.json`, scripts) is copied into the app bundle, and two with the
+  same name fail the build ("Multiple commands produce …"). Notes go in `.claude/rules/` or `docs/`.
 - Swift 5 mode. App + watch default to `MainActor` isolation; widgets don't.
 - Light mode only. Colours from `AppTheme`/`Palette`; cards use `.cardSurface()`; screens sit on `CanvasBackground`.
 - Top bars: `safeAreaBar(edge: .top)` + `.scrollEdgeEffectStyle(.soft, for: .top)`. Never on bottom bars.

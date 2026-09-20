@@ -31,7 +31,7 @@ struct ReceiptReadingView: View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(reader.failure == nil ? "Reading your receipt" : "Couldn't read that")
+                    Text(title)
                         .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundStyle(AppTheme.ink)
                         .contentTransition(.opacity)
@@ -106,6 +106,14 @@ struct ReceiptReadingView: View {
                 withAnimation(.easeOut(duration: 0.22)) { revealed = min(marks, revealed + step) }
             }
         }
+    }
+
+    /// A question when it's only the model that doubts the picture: it can
+    /// be wrong, and the card below offers to read it anyway.
+    private var title: String {
+        guard reader.failure != nil else { return "Reading your receipt" }
+        if let sight = reader.sight, !sight.isReceipt { return "Is that a receipt?" }
+        return "Couldn't read that"
     }
 
     // MARK: - Page
@@ -281,6 +289,16 @@ struct ReceiptReadingView: View {
             }
 
             PrimaryButton(title: "Try another photo", systemImage: "arrow.counterclockwise", action: onRetry)
+
+            if reader.canReadAnyway {
+                TextButton(title: "It is one.", emphasis: "Read it anyway") {
+                    reader.readAnyway()
+                    guard let scan = reader.result else { return }
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    onRead(scan, reader.pages)
+                }
+                .padding(.top, -6)
+            }
         }
         .padding(16)
         .cardSurface(corner: 22)

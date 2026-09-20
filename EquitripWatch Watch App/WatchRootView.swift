@@ -5,8 +5,8 @@
 
 import SwiftUI
 
-/// Balance, then the plan, then anything waiting on you — one vertical
-/// page each, turned with the crown.
+/// Balance, then the trip itself, then the plan, then anything waiting on
+/// you — one vertical page each, turned with the crown.
 struct WatchRootView: View {
     @Environment(WatchStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
@@ -35,6 +35,7 @@ struct WatchRootView: View {
             if snapshot.hasTrips {
                 TabView {
                     BalancePage()
+                    TripPage()
                     AgendaPage()
                     SettleRequestsPage()
                 }
@@ -73,11 +74,17 @@ private struct TripPicker: View {
         Button {
             isPresented = true
         } label: {
-            // Dark on the accent disc — the toolbar fills the button with
-            // the app tint, and an accent glyph on it disappears.
+            // Glass, not the accent disc the toolbar gives a tinted button:
+            // this sits over a trip's own photograph, and a solid indigo
+            // circle punched a hole in it. White on glass takes its colour
+            // from whatever is behind and stays legible on all of them.
             Image(systemName: "suitcase.fill")
-                .foregroundStyle(Brand.ctaLabel)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .glassEffect(.regular, in: .circle)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel("Choose trip")
         .sheet(isPresented: $isPresented) {
             ScrollView {
@@ -173,7 +180,11 @@ private struct TripCoverRow: View {
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(trip.title)
-                        .font(.display(.headline))
+                        // The trip's own face here too: the phone sets a name
+                        // in it wherever the name appears, and a picker that
+                        // fell back to the serif would be the one place two
+                        // trips looked alike.
+                        .tripTitle(TripTitleStyle(stored: trip.titleStyle), size: 17)
                         .foregroundStyle(.white)
                     Text(trip.dateRange)
                         .font(.caption2)

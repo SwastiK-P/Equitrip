@@ -48,6 +48,12 @@ struct ReceiptScan: Equatable {
     var chargesTotal: Double {
         charges.filter { !$0.isIncluded }.reduce(0) { $0 + $1.amount }
     }
+
+    /// What the expense is for: the printed total, or the parts when the
+    /// receipt never printed one. To the paisa, never negative.
+    var amountPaid: Double {
+        max(0, ((total ?? itemsTotal + chargesTotal) * 100).rounded() / 100)
+    }
 }
 
 /// One thing bought.

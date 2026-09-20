@@ -189,7 +189,8 @@ struct SettleRequestDetail: View {
                 .foregroundStyle(Brand.danger)
             }
         }
-        .watchPageTint(Brand.accent)
+        // Pushed over the pages, so the navigation container's.
+        .watchPageTint(Brand.accent, placement: .navigation)
         .confirmationDialog(
             "Tell \(request.fromName) you haven't received \(request.amountLabel)?",
             isPresented: $confirmingDecline,

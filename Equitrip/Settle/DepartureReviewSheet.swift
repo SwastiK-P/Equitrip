@@ -285,7 +285,10 @@ struct DepartureReviewSheet: View {
 
     private func respond(_ status: TripDeparture.Status) {
         store.respondToDeparture(departure, with: status, in: trip.id)
-        dismiss()
+        Task { @MainActor in
+            try? await Task.sleep(for: SlideToRespond.landingHold)
+            dismiss()
+        }
     }
 }
 

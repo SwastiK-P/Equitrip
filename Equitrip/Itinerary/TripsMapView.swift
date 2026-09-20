@@ -388,7 +388,7 @@ private struct TripMapCard: View {
                     .lineLimit(1)
 
                 Text(trip.title)
-                    .font(AppTheme.display(23))
+                    .tripTitle(trip.titleStyle, size: 23)
                     .foregroundStyle(AppTheme.ink)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)

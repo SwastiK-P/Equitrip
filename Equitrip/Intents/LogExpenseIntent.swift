@@ -178,7 +178,7 @@ struct LogExpenseIntent: AppIntent {
     private func eachLabel(for item: ItineraryItem, on trip: Trip) -> String? {
         let heads = trip.bearers(of: item).count
         guard heads > 1 else { return nil }
-        return Money.format(amount / Double(heads), code: trip.currencyCode)
+        return Money.format(Money.wholeShare(of: amount, heads: heads), code: trip.currencyCode)
     }
 }
 

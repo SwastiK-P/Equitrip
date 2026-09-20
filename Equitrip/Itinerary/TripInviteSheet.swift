@@ -204,7 +204,7 @@ private struct InviteTicket: View {
             HStack(alignment: .bottom, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(trip.title)
-                        .font(AppTheme.display(21))
+                        .tripTitle(trip.titleStyle, size: 21)
                         .foregroundStyle(.white)
                         .lineLimit(1)
 

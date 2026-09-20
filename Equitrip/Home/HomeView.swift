@@ -78,7 +78,7 @@ struct HomeView: View {
     private enum Cover: Identifiable {
         case chat(Trip)
         case newTrip
-        /// A receipt, from capture to a filled-in quick add, for this trip.
+        /// A receipt, from capture to a filled-in booking editor, for this trip.
         case receipt(Trip)
 
         var id: String {
@@ -91,6 +91,7 @@ struct HomeView: View {
     }
     /// Which trips the hero's figures cover. Nil is the whole portfolio.
     @State private var balanceTripID: UUID?
+    @State private var showTripScopePicker = false
     /// The last `quickAddRequests` value acted on. Kept so a request that
     /// arrives before Home is on screen — a cold launch from the Lock Screen
     /// control — is still answered once it is, and only once.
@@ -250,13 +251,6 @@ struct HomeView: View {
                     onSave: {
                         SiriDonations.expenseLogged($0, on: trip.id, in: store)
                         store.addItem($0, to: trip.id)
-                    },
-                    onSwitchToDetailed: { partial in
-                        cover = nil
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(420))
-                            sheet = .detailedAdd(trip, partial)
-                        }
                     }
                 )
             }
@@ -463,27 +457,9 @@ struct HomeView: View {
     /// together, and scoping to one trip is the only honest figure when a
     /// group runs one trip in rupees and the next in euros.
     private var balanceScopePicker: some View {
-        Menu {
-            Button {
-                balanceTripID = nil
-            } label: {
-                Label("All trips", systemImage: balanceTripID == nil ? "checkmark" : "square.stack.3d.up")
-            }
-
-            if !store.trips.isEmpty { Divider() }
-
-            ForEach(store.trips) { trip in
-                Button {
-                    balanceTripID = trip.id
-                } label: {
-                    // The dates go on as a subtitle: groups reuse trip names
-                    // ("Paris Escape" twice in a year is normal), and a menu of
-                    // identical rows is a menu you can't choose from.
-                    Text(trip.title)
-                    Text(trip.dateRange)
-                    Image(systemName: balanceTripID == trip.id ? "checkmark" : trip.symbol)
-                }
-            }
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showTripScopePicker = true
         } label: {
             HStack(spacing: 5) {
                 Text(balanceTrip?.title ?? "All trips")
@@ -499,9 +475,12 @@ struct HomeView: View {
             .background(AppTheme.accent.opacity(0.12), in: .capsule)
             .contentShape(.capsule)
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityLabel("Balance scope, \(balanceTrip?.title ?? "all trips")")
+        .popover(isPresented: $showTripScopePicker, arrowEdge: .top) {
+            TripScopePickerMenu(trips: store.trips, selection: $balanceTripID)
+                .presentationCompactAdaptation(.popover)
+        }
     }
 
     // MARK: - Balance hero
@@ -709,7 +688,12 @@ struct HomeView: View {
                             .foregroundStyle(isEnabled(action) ? AppTheme.accent : AppTheme.inkTertiary)
                             .frame(width: pane.scaled(54, regular: 62), height: pane.scaled(54, regular: 62))
                             .contentShape(.circle)
-                            .glassEffect(.regular, in: .circle)
+                            // Interactive, so the disc answers a press the way
+                            // the system's own glass buttons do — it swells and
+                            // lights under the finger. Off while the action has
+                            // nothing to act on, so a dead shortcut doesn't
+                            // pretend to press.
+                            .glassEffect(.regular.interactive(isEnabled(action)), in: .circle)
 
                         Text(action.title)
                             .font(.system(size: 12, weight: .medium))
@@ -723,7 +707,10 @@ struct HomeView: View {
                     // the tap rather than just the 54pt disc.
                     .contentShape(.rect)
                 }
-                .buttonStyle(PressableButtonStyle())
+                // Plain rather than `PressableButtonStyle`: its shrink-and-dim
+                // on the whole cell fought the glass's own swell, and the two
+                // together read as the button flinching.
+                .buttonStyle(.plain)
                 .disabled(!isEnabled(action))
             }
         }

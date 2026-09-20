@@ -6,7 +6,7 @@
 
 ## Equitrip — iOS app
 
-210 files, 55k lines.
+222 files, 60k lines.
 
 **(root)**
 - `ContentView.swift` (0.1k) — ContentView
@@ -46,17 +46,20 @@
 - `DestinationImage.swift` (0.1k) — DestinationImage — A photograph of a place, with a designed fallback.
 - `EquitripField.swift` (0.1k) — EquitripField, ShakeEffect — Labelled field with an animated focus ring, matching the card surfaces.
 - `GlassForm.swift` (0.2k) — PanelSurface, GlassField, GlassRow, TravellerChip, FlowLayout
-- `GlassToast.swift` (0.2k) — GlassToastCenter, GlassToastOverlay — One reusable liquid-glass toast, queued and auto-dismissed.
+- `GlassToast.swift` (0.3k) — GlassToastCenter, GlassToastOverlay, GlassToastContent
 - `ImageSourceSheet.swift` (0.3k) — ImageSourceSheet — Where a booking's photo comes from: searched on Unsplash, or picked from the library.
+- `IslandToastView.swift` (0.3k) — IslandToastView, DynamicIslandMetrics — A toast that drips out of the Dynamic Island as a droplet of island-black, turns to liquid glass as it swells…
 - `Layout.swift` (0.5k) — PaneMetrics, PaneReader, AdaptiveColumns, CardGrid
 - `LocationPicker.swift` (0.2k) — LocationCompleter, LocationPickerSheet — Live place suggestions from Apple Maps.
 - `ParticipantPickerSheet.swift` (0.2k) — ParticipantPickerSheet, ParticipantSummaryRow — Who's on one booking.
 - `ProgressiveBlur.swift` (0.1k) — ProgressiveBlur — A blur that ramps in across a strip rather than switching on at a line.
 - `Surfaces.swift` (0.3k) — CanvasBackground, CardSurface, Hairline, SectionHeader, ConnectionBanner, LoadingState, +3
 - `SwipeToDelete.swift` (0.1k) — SwipeToDelete — Swipe a card row left to delete it.
-- `ToastCenter.swift` (0.2k) — ToastCenter, ToastOverlay — One live-update banner, queued and auto-dismissed.
+- `ToastCenter.swift` (0.1k) — ToastCenter — Settlement updates, the only toasts nobody asked for.
+- `ToastMotion.swift` (0.2k) — ToastMotion — Where every channel of a toast's entrance and exit stands at one instant.
 - `TravellerAvatar.swift` (0.1k) — TravellerAvatar, AvatarStack — The avatar artwork is a filled circle in its own right, cropped so the art's edge *is* the frame's edge — cli…
 - `TravellerPickerSheet.swift` (0.4k) — TravellerPickerSheet, TravellerSummaryRow — Managing who's on the trip.
+- `TripTitleStylePicker.swift` (0.1k) — TripTitleStylePicker — Choosing the typeface a trip's name is set in.
 - `ViewHelpers.swift` (0.1k) — ScreenInsets
 
 **Equi/**
@@ -66,7 +69,7 @@
 - `EquiCard.swift` (0.6k) — EquiCardKind, EquiAnswer, EquiCard, EquiCardView — A card the model asked for, bound to a real trip.
 - `EquiContext.swift` (0.2k) — EquiContext — Turns everything the app knows about the user's trips into the plain-text briefing Equi is given before answe…
 - `EquiConversationList.swift` (0.2k) — EquiConversationList — Equi's past conversations as shelved rows — the body of the history sheet on a phone, and the whole of the si…
-- `EquiHero.swift` (0.4k) — EquiHand, EquiHeroScene — The one handwritten face in the app, used only for the two margin notes on Equi's opening screen.
+- `EquiHero.swift` (0.4k) — EquiHand, EquiHandArrow, EquiHeroScene
 - `EquiHistorySheet.swift` (0.1k) — EquiHistorySheet — Every conversation Equi has had with this account, newest first.
 - `EquiHistoryStore.swift` (0.3k) — EquiConversationSummary, EquiHistoryStore, EquiConversationRow, NewEquiConversation, EquiMessageRow — Equi's conversations, on the server.
 - `EquiIntelligence.swift` (0.2k) — EquiIntelligence — The on-device Apple Intelligence model behind Equi's chat tab.
@@ -94,8 +97,8 @@
 
 **Home/**
 - `AvatarPickerSheet.swift` (0.3k) — AvatarPickerSheet — Choosing the face you show up as.
-- `HomeCards.swift` (0.4k) — CurrentTripCard, NewTripCard, ProgressTrack, ItineraryRow, ActivityRow, PendingSettlementsCard
-- `HomeView.swift` (0.9k) — HomeView — The "where do I stand?" screen.
+- `HomeCards.swift` (0.5k) — CurrentTripCard, NewTripCard, ProgressTrack, ItineraryRow, ActivityRow, PendingSettlementsCard, +1
+- `HomeView.swift` (0.8k) — HomeView — The "where do I stand?" screen.
 - `NotificationsSheet.swift` (0.3k) — NotificationsSheet — What the bell opens.
 - `ProfileSheet.swift` (0.7k) — ProfileSheet, SettingsSheetScaffold — What the top-right avatar opens.
 - `SiriSettingsSheet.swift` (0.1k) — SiriSettingsSheet — What you can say to Siri about your trips.
@@ -143,14 +146,18 @@
 - `FlightRouteMap.swift` (0.3k) — FlightRouteMap — The route, drawn on a map: two pins and the great-circle arc between them.
 - `FlightTicketCard.swift` (0.3k) — FlightTicketCard — A flight, drawn as the thing it is: a ticket.
 - `ItineraryItemDetailView.swift` (0.9k) — ItineraryItemDetailView — One booking, in full.
+- `NoTripsAhead.swift` (0.3k) — NoTripsAhead — The Itinerary tab with nothing in front of it.
+- `PastTripsView.swift` (0.1k) — PastTripsView — Every trip that has ended, newest first, grouped by the year it ended.
 - `PaymentSheet.swift` (0.3k) — PaymentSheet — Recording who actually paid for something.
 - `ReceiptPreview.swift` (0.2k) — ReceiptRef, ReceiptPreview — A receipt, full screen and zoomable.
 - `TimelineComponents.swift` (0.4k) — DayHeader, DepartureMarker, TimelineRow
 - `TripEditorSheet.swift` (0.4k) — TripEditorSheet — Editing a trip after it exists.
 - `TripInviteSheet.swift` (0.5k) — TripInviteSheet, Corner, BracketShape, QRCode — Inviting someone to a trip.
 - `TripItineraryView.swift` (1.1k) — TripItineraryView — The master itinerary, as a timeline.
-- `TripListView.swift` (0.4k) — TripListView — Every trip, grouped by where it is in its life.
+- `TripListView.swift` (0.5k) — TripListView, TripPlaceCard — Every trip, grouped by where it is in its life.
 - `TripPadComponents.swift` (0.2k) — TripFactTile, TripSummaryRow, TripCostBar
+- `TripRecapCards.swift` (0.8k) — RecapHeadlineCard, RecapBreakdownCard, RecapDaysCard, RecapPayersCard, RecapYourPaymentsCard, RecapHighlightsGrid, +1
+- `TripRecapView.swift` (0.4k) — TripRecapView, TripRecapEntryCard — The trip, wrapped: a finished trip told back as a handful of cards instead of a ledger to audit.
 - `TripsMapView.swift` (0.5k) — TripsMapView — Every trip, on one map.
 
 **Model/**
@@ -171,13 +178,14 @@
 - `TripDeparture.swift` (0.3k) — TripDeparture — Somebody leaving a trip that's already running, and the arithmetic that closes their side of it.
 - `TripDraft.swift` (0.2k) — TripDraft — The mutable thing the creation flow builds up.
 - `TripInvitation.swift` (0.1k) — TripInvitation — A trip somebody has been asked to join, before they've answered.
+- `TripRecap.swift` (0.3k) — TripRecap — A finished trip, read back as a story: what it cost, where the money went, who carried it, and whether everyo…
 
 **NewTrip/**
 - `ItineraryIssueCard.swift` (0.3k) — ItineraryIssueCard — What the consistency check found, on the screen where it can still be acted on cheaply.
 - `ItineraryItemEditor.swift` (1.0k) — ItineraryItemEditor — Editing one booking — including the three things that make a group ledger different from a shared spreadsheet…
 - `JoinTripFlow.swift` (0.4k) — JoinTripFlow — Joining someone else's trip.
 - `NewTripFlow.swift` (0.6k) — NewTripFlow — Creating a trip, both ways in.
-- `QuickAddSheet.swift` (0.7k) — QuickAddSheet — Logging something that just happened.
+- `QuickAddSheet.swift` (0.5k) — QuickAddSheet — Logging something that just happened.
 - `TripBasicsStage.swift` (0.5k) — TripBasicsStage — The manual route: the handful of facts a trip can't exist without.
 - `TripImportStage.swift` (0.6k) — TripImportStage — Picks a PDF and watches the document being read.
 - `TripInvitationSheet.swift` (0.2k) — TripInvitationsCard, TripInvitationSheet — An invitation, opened.
@@ -186,14 +194,17 @@
 - `TripReviewStage.swift` (0.5k) — TripReviewStage — The last stop before a trip becomes the group's shared record.
 
 **Onboarding/**
+- `BookingsShowcase.swift` (0.3k) — BookingsShowcase — Onboarding's second page: booking PDFs read into the itinerary on device.
 - `OnboardingHero.swift` (0.3k) — OnboardingHero, TripCard — A swipeable deck of real trip cards.
-- `OnboardingView.swift` (0.2k) — OnboardingView, OnboardingFeature
+- `OnboardingView.swift` (0.3k) — OnboardingView, OnboardingPageDots, OnboardingFeature
 - `SettleDemo.swift` (0.2k) — SettleDemo — The trip onboarding argues with.
 - `SettleHaptics.swift` (0.2k) — SettleHaptics — What organising the pile feels like.
 - `SettleShowcase.swift` (0.6k) — SettleShowcase, SettleTiming — The ledger problem, then the ledger solved.
 
 **Receipts/**
+- `ReceiptBooking.swift` (0.1k) — ext ItineraryItem
 - `ReceiptCamera.swift` (0.1k) — ReceiptCamera — The system document camera, pointed at a receipt.
+- `ReceiptGlance.swift` (0.2k) — PictureKind, ReceiptGlance — One look at the picture itself: is this a receipt at all?
 - `ReceiptImagePrep.swift` (0.2k) — ReceiptImagePrep — Gets a photograph of a receipt into the shape text recognition reads best.
 - `ReceiptInterpreter.swift` (0.2k) — ReceiptInterpreter — The judgement pass: which printed line is which, read by Apple Intelligence.
 - `ReceiptLayout.swift` (0.2k) — ReceiptCell, ReceiptRow, ReceiptLayout — Puts a receipt's scattered lines back into the rows they were printed as.
@@ -205,13 +216,14 @@
 - `ReceiptReadingView.swift` (0.3k) — ReceiptReadingView — The receipt, being read: every line found lights up where it sits on the paper.
 - `ReceiptReconciler.swift` (0.4k) — ReceiptReconciler — Makes a receipt's numbers agree with each other, or says exactly where they don't.
 - `ReceiptScan.swift` (0.2k) — ReceiptScan, ReceiptLine, ReceiptCharge, ReceiptCheck — A receipt, read: what was bought, what was added on top, and what it came to.
-- `ReceiptScanFlow.swift` (0.2k) — ReceiptScanFlow — Receipt to expense in one presentation: pick or scan, watch it read, then the ordinary quick-add form fills i…
-- `ReceiptSeed.swift` (0.1k) — ext QuickAddSheet.Seed
+- `ReceiptScanFlow.swift` (0.2k) — ReceiptScanFlow — Receipt to expense in one presentation: pick or scan, watch it read, then the full booking editor opens with…
+- `ReceiptSourceView.swift` (0.6k) — ReceiptSourceView — Where a receipt comes from: paper through the camera, or a picture already in the library.
 
 **Root/**
 - `AppNavigator.swift` (0.1k) — AppNavigator — Where Siri, Spotlight or a Shortcut has asked the app to go.
 - `ControlRoutes.swift` (0.1k) — ControlRoutes — Hears a Control Centre / Lock Screen button press while the app is already running.
 - `EquitripShortcuts.swift` (0.1k) — EquitripShortcuts — The sentences Siri knows before anyone has set anything up.
+- `ItineraryRoute.swift` (0.1k) — ItineraryRoute — A screen on the Itinerary tab's stack.
 - `RootTabView.swift` (0.4k) — AppTab, RootTabView — The tabs the product actually needs.
 
 **Scanning/**
@@ -221,7 +233,7 @@
 - `QRScannerView.swift` (0.4k) — QRScannerView, Torch, QRScanScreen — Live QR scanning through VisionKit's data scanner.
 
 **Services/**
-- `AppSettings.swift` (0.2k) — AppSettings, LedgerExport, ShareSheet, ExportedFile — The handful of preferences that outlive a screen.
+- `AppSettings.swift` (0.1k) — AppSettings — The handful of preferences that outlive a screen.
 - `AuthService.swift` (0.2k) — AuthService — Wraps Supabase auth so views never touch the SDK directly.
 - `CoverStore.swift` (0.1k) — CoverStore — Trip cover images, stored once and reused.
 - `CoverTint.swift` (0.1k) — CoverTint — The colour a photograph is, in one swatch.
@@ -234,8 +246,8 @@
 - `ShakeDetector.swift` (0.1k) — ext Notification.Name, ext UIWindow
 - `SpotlightIndex.swift` (0.1k) — SpotlightIndex — Keeps every trip and booking in the system's semantic index.
 - `SupabaseConfig.swift` (0.1k) — SupabaseConfig — Project connection details.
-- `SupabaseRepository.swift` (0.8k) — SupabaseRepository — Everything that talks to Postgres.
-- `SupabaseRows.swift` (0.5k) — ProfileRow, MembershipRow, TripPreviewRow, NotificationRow, AuditEventRow, SettlementRow, +7
+- `SupabaseRepository.swift` (0.9k) — SupabaseRepository — Everything that talks to Postgres.
+- `SupabaseRows.swift` (0.5k) — ProfileRow, MembershipRow, ProfileIDRow, TripPreviewPersonRow, JoinTripRow, TripPreviewRow, +10
 - `TravellerDirectory.swift` (0.2k) — TravellerDirectory — Turning an email address into a person.
 - `UPI.swift` (0.1k) — UPILink — Building the one URL every UPI app on the phone already knows how to open.
 - `WatchBridge.swift` (0.2k) — WatchBridge — The phone's half of the watch app.
@@ -250,7 +262,7 @@
 - `SettleView.swift` (0.7k) — SettleView — Who pays whom, minimised — and the record of what's already moved.
 - `SettlementEngine.swift` (0.3k) — Settlement, SettlementEngine — Turns a trip's outstanding balances into the fewest transfers that clear every one of them.
 - `SettlementReviewSheet.swift` (0.2k) — SettlementReviewSheet — The recipient's side: somebody says they paid you.
-- `SlideToRespond.swift` (0.3k) — SlideToRespond — Answering a settlement claim as one drag instead of two taps.
+- `SlideToRespond.swift` (0.4k) — SlideToRespond — Answering a settlement claim as one drag instead of two taps.
 
 **Stores/**
 - `AppContext.swift` (0.1k) — AppContext — The stores, for code that runs with no screen on it: Siri, Shortcuts, Spotlight, Visual Intelligence and the…
@@ -260,7 +272,7 @@
 
 ## EquitripShared — compiled into app + widgets + watch (see membership exceptions in project.pbxproj)
 
-6 files, 1k lines.
+7 files, 1k lines.
 
 **(root)**
 - `AddExpenseIntent.swift` (0.1k) — AddExpenseIntent — Opens the app on the quick-add sheet.
@@ -268,6 +280,7 @@
 - `EquitripSnapshot.swift` (0.5k) — EquitripSnapshot, SharedStore — What the widgets are allowed to know.
 - `OpenEquiIntent.swift` (0.1k) — OpenEquiIntent — Opens the app on Equi.
 - `SnapshotStyle.swift` (0.1k) — MoneyTone — Direction, not sentiment — the same rule `AppTheme` states for the app.
+- `TripTitleStyle.swift` (0.1k) — TripTitleStyle — The typeface a trip's name is set in, chosen by whoever organises it.
 - `WatchMessage.swift` (0.1k) — WatchCommand, WatchReply, WatchWire
 
 ## EquitripWidgets — WidgetKit extension: widgets, controls
@@ -288,15 +301,16 @@
 
 ## EquitripWatch Watch App — watchOS app, fed by WatchConnectivity snapshots
 
-9 files, 2k lines.
+10 files, 2k lines.
 
 **(root)**
 - `AgendaPage.swift` (0.2k) — AgendaPage — What's next on the trip in view, a day at a time.
-- `BalancePage.swift` (0.3k) — BalancePage — Home's hero, on the wrist: "am I up or down?" first and largest, the two sides of it underneath, then the tri…
+- `BalancePage.swift` (0.1k) — BalancePage — Home's hero, on the wrist: "am I up or down?" first and largest, with the two sides of it underneath.
 - `CoverImage.swift` (0.1k) — CoverImage, CoverCache — A trip's cover photo, on the wrist.
 - `EquitripWatchApp.swift` (0.1k) — EquitripWatchApp
-- `EventDetailView.swift` (0.2k) — EventDetailView — One booking: what it is, when, what it costs you — and for a flight, the route, terminal and gate laid out li…
+- `EventDetailView.swift` (0.5k) — EventDetailView — One booking — the phone's detail sheet at wrist scale.
 - `SettleRequestsPage.swift` (0.2k) — SettleRequestsPage, SettleRequestDetail — Every "I paid you" waiting on your answer, across every trip — the watch's version of Home's pending-settleme…
-- `WatchChrome.swift` (0.3k) — WatchCard, SplitCells, DayTrack, DottedFigure, Eyebrow, SymbolBadge, +4
-- `WatchRootView.swift` (0.2k) — WatchRootView — Balance, then the plan, then anything waiting on you — one vertical page each, turned with the crown.
+- `TripPage.swift` (0.2k) — TripPage — The trip in view, as its photograph — Home's current-trip card given the whole screen.
+- `WatchChrome.swift` (0.4k) — WatchCard, SplitCells, DayTrack, DottedFigure, Eyebrow, SymbolBadge, +5
+- `WatchRootView.swift` (0.2k) — WatchRootView — Balance, then the trip itself, then the plan, then anything waiting on you — one vertical page each, turned w…
 - `WatchStore.swift` (0.3k) — WatchStore — Everything the watch knows, and the only thing on it that talks to the phone.

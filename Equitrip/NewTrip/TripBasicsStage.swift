@@ -53,6 +53,9 @@ struct TripBasicsStage: View {
                 travellers
                     .staggered(4, appeared)
 
+                customize
+                    .staggered(5, appeared)
+
                 Color.clear.frame(height: 20)
             }
             .padding(.horizontal, 20)
@@ -154,7 +157,7 @@ struct TripBasicsStage: View {
         .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(draft.title.isEmpty ? "Your trip" : draft.title)
-                    .font(AppTheme.display(23))
+                    .tripTitle(draft.titleStyle, size: 23)
                     .foregroundStyle(.white)
 
                 HStack(spacing: 5) {
@@ -429,6 +432,14 @@ struct TripBasicsStage: View {
     }
 
     // MARK: - Chrome
+
+    /// How the trip's name is set, shown on the preview at the top as it's picked.
+    private var customize: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            fieldLabel("Customize")
+            TripTitleStylePicker(title: draft.title, selection: $draft.titleStyle)
+        }
+    }
 
     private func fieldLabel(_ text: String) -> some View {
         Text(text.uppercased())

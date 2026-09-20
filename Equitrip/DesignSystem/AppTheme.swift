@@ -99,6 +99,13 @@ enum Palette {
     static let greenDeep = AppTheme.dynamic(light: 0x1E7A55, dark: 0x2E9C72)
     static let amberDeep = AppTheme.dynamic(light: 0xD97706, dark: 0xC98A2E)
     static let violetDeep = AppTheme.dynamic(light: 0x7C4DE0, dark: 0x6B45C0)
+
+    /// Light thrown across a near-black surface (`SlideToRespond`'s track).
+    /// `positive` is tuned for text on white and goes muddy as a glow on
+    /// black, and `danger`'s dark variant reads as salmon rather than red —
+    /// so the two answers get their own, brighter pair.
+    static let glowGreen = AppTheme.dynamic(light: 0x3DD68C, dark: 0x3DD68C)
+    static let glowRed = AppTheme.dynamic(light: 0xFF5A4F, dark: 0xFF5A4F)
 }
 
 // MARK: - Avatar palettes

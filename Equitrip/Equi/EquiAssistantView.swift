@@ -594,67 +594,66 @@ struct EquiAssistantView: View {
 
     // MARK: - Composer
 
-    /// The field and the send button share one `GlassEffectContainer` so they
-    /// sample the same backdrop and read as two pieces of a single material —
-    /// which is also what lets the button grow out of the capsule rather than
-    /// appear beside it.
+    /// The field and the send button sit on one capsule of glass, the button
+    /// tucked inside its trailing edge, so the composer reads as a single
+    /// surface rather than a field with a button stuck beside it.
     private var composerBar: some View {
-        GlassEffectContainer(spacing: 9) {
-            HStack(alignment: .bottom, spacing: 9) {
-                TextField("Message Equi", text: $draft, axis: .vertical)
-                    .font(.system(size: 16))
-                    .foregroundStyle(AppTheme.ink)
-                    .lineLimit(1...5)
-                    .focused($composerFocused)
-                    .padding(.horizontal, 17)
-                    .padding(.vertical, 10)
-                    .frame(minHeight: 44)
-                    // Plain `.regular`, untinted and unstroked, because the
-                    // tab bar sitting directly beneath it is plain `.regular`
-                    // too — two pieces of glass a few points apart have to be
-                    // the same glass, and a violet wash plus a white rim on
-                    // one of them read as a mismatch rather than as emphasis.
-                    // Focus is the exception: it earns a tint, and only then.
-                    .glassEffect(
-                        .regular
-                            .tint(AppTheme.accent.opacity(composerFocused ? 0.14 : 0))
-                            .interactive(),
-                        in: .capsule
-                    )
-                    .overlay {
-                        if composerFocused {
-                            Capsule()
-                                .strokeBorder(AppTheme.accent.opacity(0.4), lineWidth: 1.2)
-                        }
-                    }
+        HStack(alignment: .bottom, spacing: 4) {
+            TextField("Message Equi", text: $draft, axis: .vertical)
+                .font(.system(size: 16))
+                .foregroundStyle(AppTheme.ink)
+                .lineLimit(1...5)
+                .focused($composerFocused)
+                .padding(.vertical, 10)
 
-                if canSend {
-                    Button(action: submit) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(
-                                LinearGradient(
-                                    colors: [AppTheme.accent, AppTheme.accentDeep],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                in: .circle
-                            )
-                            .shadow(color: AppTheme.accent.opacity(0.35), radius: 8, y: 3)
-                    }
-                    .buttonStyle(PressableButtonStyle())
-                    .transition(.scale(scale: 0.5).combined(with: .opacity))
-                }
+            Button(action: submit) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        LinearGradient(
+                            colors: canSend
+                                ? [AppTheme.accent, AppTheme.accentDeep]
+                                : [AppTheme.accent.opacity(0.35), AppTheme.accentDeep.opacity(0.35)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        in: .circle
+                    )
+                    .shadow(color: AppTheme.accent.opacity(canSend ? 0.35 : 0), radius: 6, y: 2)
+            }
+            .buttonStyle(PressableButtonStyle())
+            .disabled(!canSend)
+            .padding(.vertical, 6)
+        }
+        .padding(.leading, 17)
+        .padding(.trailing, 6)
+        .frame(minHeight: 44)
+        // Plain `.regular`, untinted and unstroked, because the tab bar
+        // sitting directly beneath it is plain `.regular` too — two pieces
+        // of glass a few points apart have to be the same glass, and a
+        // violet wash plus a white rim on one of them read as a mismatch
+        // rather than as emphasis. Focus is the exception: it earns a tint,
+        // and only then.
+        .glassEffect(
+            .regular
+                .tint(AppTheme.accent.opacity(composerFocused ? 0.14 : 0))
+                .interactive(),
+            in: .capsule
+        )
+        .overlay {
+            if composerFocused {
+                Capsule()
+                    .strokeBorder(AppTheme.accent.opacity(0.4), lineWidth: 1.2)
             }
         }
-        // Matches the tab bar's own inset, so the two capsules share a left
-        // and right edge instead of the composer overhanging it by a few
-        // points — which is exactly the sort of near-miss the eye picks up.
-        // That pairing only holds where the tab bar is underneath it; on iPad
-        // the bar floats at the top instead, and the field takes the same
-        // measure and inset as the transcript it's writing into.
+        // Matches the tab bar's own inset, so the capsule shares a left and
+        // right edge with it instead of overhanging by a few points — which
+        // is exactly the sort of near-miss the eye picks up. That pairing
+        // only holds where the tab bar is underneath it; on iPad the bar
+        // floats at the top instead, and the field takes the same measure
+        // and inset as the transcript it's writing into.
         .padding(.horizontal, pane.isRegular ? 16 : 22)
         .readableWidth()
         .padding(.top, 10)

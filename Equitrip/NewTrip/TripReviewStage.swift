@@ -48,6 +48,18 @@ struct TripReviewStage: View {
                 }
 
                 travellers
+
+                // The manual route already chose this on the basics screen;
+                // an imported trip never passed through it.
+                if draft.wasImported {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Customize")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(AppTheme.inkSecondary)
+                        TripTitleStylePicker(title: draft.title, selection: $draft.titleStyle)
+                    }
+                }
+
                 bookings
                 totals
 
@@ -223,6 +235,7 @@ struct TripReviewStage: View {
                             .tint(.white)
                     } else {
                         Text(draft.title.isEmpty ? "Untitled trip" : draft.title)
+                            .tripTitle(draft.titleStyle, size: 23)
                             .onTapGesture {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 isEditingTitle = true
@@ -424,7 +437,7 @@ struct TripReviewStage: View {
             totalRow(
                 label: "Even split, \(draft.travellers.count.pluralised("person", "people"))",
                 value: Money.format(
-                    draft.travellers.isEmpty ? 0 : draft.totalCost / Double(draft.travellers.count),
+                    Money.wholeShare(of: draft.totalCost, heads: draft.travellers.count),
                     code: draft.currencyCode
                 ),
                 emphasised: false

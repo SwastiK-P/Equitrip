@@ -13,19 +13,87 @@ struct OnboardingView: View {
     var onSignIn: () -> Void = {}
     var onCreateAccount: () -> Void = {}
 
+    /// The swipeable pages, in order. Showcase pages are trials: dropping one
+    /// is removing its case here and deleting its file.
+    enum Page: Hashable, CaseIterable {
+        case welcome, bookings
+    }
+
+    /// Remembered for the life of the process, because `ContentView` rebuilds
+    /// this view on the way back from sign-in — without it, backing out of
+    /// the form from page two dropped you on page one.
+    private static var lastPage: Page = .welcome
+    @State private var page: Page = OnboardingView.lastPage
+
     var body: some View {
         ZStack {
             CanvasBackground()
 
+            if Page.allCases.count == 1 {
+                welcome
+            } else {
+                TabView(selection: $page) {
+                    ForEach(Page.allCases, id: \.self) { page in
+                        content(for: page)
+                            .task { await enter() }
+                            .tag(page)
+                    }
+                }
+                // Our own dots, so each page can place them in its layout
+                // (the bookings page puts them above its headline).
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .onChange(of: page) { _, now in OnboardingView.lastPage = now }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func content(for page: Page) -> some View {
+        switch page {
+        case .welcome:
+            welcome
+        case .bookings:
+            GeometryReader { geo in
+                VStack(spacing: 0) {
+                    BookingsShowcase(visible: self.page == .bookings, compact: geo.size.height < 780) {
+                        dots
+                    }
+                    actions(for: .bookings)
+                        .padding(.horizontal, 20)
+                        .padding(.top, geo.size.height < 780 ? 16 : 26)
+                }
+                .padding(.bottom, 6)
+                .frame(maxWidth: pane.isWide ? 520 : pane.readableWidth)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private var dots: some View {
+        OnboardingPageDots(count: Page.allCases.count, current: Page.allCases.firstIndex(of: page) ?? 0)
+    }
+
+    /// The entrance is triggered from the page itself (see `enter()`). Flipped
+    /// from the outer `ZStack`, it landed before the paging `TabView` had built
+    /// its first page, and the page came up with everything still at zero
+    /// opacity — a blank screen until a swipe.
+    private var welcome: some View {
+        Group {
             if pane.isWide {
                 spread
             } else {
                 column
             }
         }
-        .onAppear {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) { appeared = true }
-        }
+        .task { await enter() }
+    }
+
+    /// Runs from whichever page is on screen first — page two too, when
+    /// coming back from sign-in — a tick after it's in the hierarchy.
+    private func enter() async {
+        guard !appeared else { return }
+        await Task.yield()
+        withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) { appeared = true }
     }
 
     /// The phone layout, and iPad in portrait: one column, hero at the top.
@@ -53,7 +121,7 @@ struct OnboardingView: View {
 
                 Spacer(minLength: compact ? 14 : 24)
 
-                actions
+                actions(for: .welcome)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 6)
@@ -91,7 +159,7 @@ struct OnboardingView: View {
 
             VStack(spacing: 26) {
                 features
-                actions
+                actions(for: .welcome)
             }
             .frame(maxWidth: 420)
         }
@@ -141,15 +209,55 @@ struct OnboardingView: View {
 
     // MARK: - Actions
 
-    private var actions: some View {
-        VStack(spacing: 6) {
-            PrimaryButton(title: "Sign in", action: onSignIn)
+    /// Every page but the last leads on with Continue; the last one is the
+    /// way in. Keyed to the page being drawn rather than the selection,
+    /// because the pager renders its neighbours while you swipe — reading
+    /// `page` here put the wrong buttons on the page sliding in.
+    private func actions(for current: Page) -> some View {
+        let pages = Page.allCases
+        let index = pages.firstIndex(of: current) ?? 0
+        let next = index + 1 < pages.count ? pages[index + 1] : nil
 
-            TextButton(title: "New to Equitrip?", emphasis: "Create account", action: onCreateAccount)
+        return VStack(spacing: 6) {
+            if current == .welcome, pages.count > 1 {
+                dots.padding(.bottom, 10)
+            }
+
+            if let next {
+                PrimaryButton(title: "Continue", systemImage: nil, capsule: true) {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { page = next }
+                }
+            } else {
+                PrimaryButton(title: "Sign in", systemImage: nil, capsule: true, action: onSignIn)
+
+                TextButton(title: "New to Equitrip?", emphasis: "Create account", action: onCreateAccount)
+            }
         }
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 26)
         .animation(.spring(response: 0.6, dampingFraction: 0.85).delay(0.6), value: appeared)
+    }
+}
+
+// MARK: - Page dots
+
+/// The pager's position, drawn by hand so a page can put it where its
+/// composition wants it rather than pinned to the bottom edge.
+struct OnboardingPageDots: View {
+    let count: Int
+    let current: Int
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ForEach(0..<count, id: \.self) { index in
+                Capsule()
+                    .fill(index == current ? AppTheme.ink : AppTheme.inkTertiary.opacity(0.35))
+                    .frame(width: index == current ? 20 : 7, height: 7)
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: current)
+        .accessibilityElement()
+        .accessibilityLabel("Page \(current + 1) of \(count)")
     }
 }
 

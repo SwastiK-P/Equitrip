@@ -37,8 +37,6 @@ struct ProfileSheet: View {
     /// Observed so the row's value line follows a connection made inside the
     /// sub-sheet without the profile screen being re-presented.
     @State private var gmail = GmailAccount.shared
-    @State private var exported: ExportedFile?
-    @State private var exportFailed = false
 
     /// Mirrors of the stored preferences. `AppSettings` is plain
     /// `UserDefaults` rather than `@AppStorage`, because it's read from
@@ -54,6 +52,12 @@ struct ProfileSheet: View {
     /// `resetShakeHint`. Not persisted; it only ever needs to be on screen
     /// for the couple of seconds after the long press that triggered it.
     @State private var shakeHintWasReset = false
+
+    /// The colophon's heart burst. `heartBurstToken` is bumped on every tap
+    /// so a retap's delayed cleanup can't clear the *newer* burst it started.
+    @State private var heartBurst: [HeartConfettiParticle] = []
+    @State private var heartBurstAnimating = false
+    @State private var heartBurstToken = 0
 
     private var displayName: String {
         guard let userName, !userName.isEmpty else { return "Traveller" }
@@ -102,14 +106,6 @@ struct ProfileSheet: View {
         }
         .sheet(isPresented: $showSiri) {
             SiriSettingsSheet()
-        }
-        .sheet(item: $exported) { file in
-            ShareSheet(items: [file.url])
-        }
-        .alert("Couldn't write the ledger", isPresented: $exportFailed) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("There wasn't room to save the file. Free some space and try again.")
         }
         .onChange(of: currency) { _, new in AppSettings.defaultCurrency = new }
         .onChange(of: method) { _, new in AppSettings.defaultPaymentMethod = new }
@@ -234,14 +230,6 @@ struct ProfileSheet: View {
                     title: "Notifications",
                     value: notificationSummary
                 ) { showNotificationSettings = true }
-
-                Hairline(inset: 16)
-
-                settingsRow(
-                    symbol: "square.and.arrow.up",
-                    title: "Export trip ledger",
-                    value: store.trips.isEmpty ? "No trips" : "\(store.trips.count) CSV"
-                ) { exportLedger() }
 
                 Hairline(inset: 16)
 
@@ -420,14 +408,6 @@ struct ProfileSheet: View {
         }
     }
 
-    private func exportLedger() {
-        guard let url = LedgerExport.write(store.trips) else {
-            exportFailed = true
-            return
-        }
-        exported = ExportedFile(url: url)
-    }
-
     // MARK: - Sign out
 
     private var signOut: some View {
@@ -448,19 +428,84 @@ struct ProfileSheet: View {
     // MARK: - Colophon
 
     private var colophon: some View {
-        HStack(spacing: 5) {
-            Text("Made with")
-            Image(systemName: "heart.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(AppTheme.danger)
-            Text("by Swastik")
+        Button {
+            burstHearts()
+        } label: {
+            HStack(spacing: 6) {
+                Text("Made with")
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.danger)
+                Text("by Swastik")
+            }
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(AppTheme.inkTertiary)
         }
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(AppTheme.inkTertiary)
+        .buttonStyle(.plain)
         .padding(.top, 4)
+        .overlay { heartConfetti }
         .accessibilityElement()
         .accessibilityLabel("Made with love by Swastik")
     }
+
+    /// Hearts thrown from the colophon on tap — the one unserious thing on
+    /// this screen, and the only place it's earned. Particles are created
+    /// with their rest position first (no animation), then a single flag flip
+    /// inside `withAnimation` carries them all outward together; that's what
+    /// keeps a retap from restarting mid-burst into a jump cut.
+    @ViewBuilder
+    private var heartConfetti: some View {
+        ZStack {
+            ForEach(heartBurst) { heart in
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 12 * heart.scale, weight: .semibold))
+                    .foregroundStyle(AppTheme.danger.opacity(heart.opacity))
+                    .rotationEffect(.degrees(heartBurstAnimating ? heart.rotation : 0))
+                    .scaleEffect(heartBurstAnimating ? heart.scale : 0.4)
+                    .offset(x: heartBurstAnimating ? heart.dx : 0, y: heartBurstAnimating ? heart.dy : 0)
+                    .opacity(heartBurstAnimating ? 0 : 1)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func burstHearts() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+        heartBurstToken += 1
+        heartBurstAnimating = false
+        heartBurst = (0..<14).map { _ in
+            HeartConfettiParticle(
+                dx: CGFloat.random(in: -90...90),
+                dy: CGFloat.random(in: -130 ... -30),
+                rotation: Double.random(in: -70...70),
+                scale: CGFloat.random(in: 0.6...1.25),
+                opacity: Double.random(in: 0.65...1)
+            )
+        }
+
+        withAnimation(.easeOut(duration: 0.9)) {
+            heartBurstAnimating = true
+        }
+
+        let burstID = heartBurstToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            guard burstID == heartBurstToken else { return }
+            heartBurst = []
+            heartBurstAnimating = false
+        }
+    }
+}
+
+/// One heart in the colophon's tap burst, at its rest state — `dx`/`dy` etc.
+/// are the *outward* offset it animates to, not where it starts.
+private struct HeartConfettiParticle: Identifiable {
+    let id = UUID()
+    let dx: CGFloat
+    let dy: CGFloat
+    let rotation: Double
+    let scale: CGFloat
+    let opacity: Double
 }
 
 // MARK: - Payment methods

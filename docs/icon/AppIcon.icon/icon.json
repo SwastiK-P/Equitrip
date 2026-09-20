@@ -1,0 +1,25 @@
+{
+  "fill" : {
+    "automatic-gradient" : "srgb:0.97255,0.89412,0.83529,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        { "image-name" : "Shares.svg", "name" : "Shares", "glass" : true }
+      ],
+      "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
+      "translucency" : { "enabled" : true, "value" : 0.4 }
+    },
+    {
+      "layers" : [
+        { "image-name" : "Pin.svg", "name" : "Pin", "glass" : true }
+      ],
+      "shadow" : { "kind" : "layer-color", "opacity" : 0.5 },
+      "translucency" : { "enabled" : false, "value" : 0.5 }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [ "watchOS" ],
+    "squares" : "shared"
+  }
+}

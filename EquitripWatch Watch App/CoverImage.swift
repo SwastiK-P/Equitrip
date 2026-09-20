@@ -18,6 +18,10 @@ struct CoverImage: View {
     let url: URL?
     /// Drawn while the photo loads, and in its place when there is none.
     var symbol: String?
+    /// Where that glyph sits. Centred in a row, but the trip page lays its
+    /// own type across the middle of the picture, and a centred glyph comes
+    /// out through the trip's name.
+    var symbolAlignment: Alignment = .center
 
     @State private var image: UIImage?
 
@@ -52,10 +56,11 @@ struct CoverImage: View {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
-        .overlay {
+        .overlay(alignment: symbolAlignment) {
             Image(systemName: symbol ?? "airplane")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.75))
+                .padding(26)
         }
     }
 }

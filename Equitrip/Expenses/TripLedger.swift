@@ -820,14 +820,14 @@ private struct SpendBreakdown: View {
                     .overlay(alignment: .leading) {
                         // The saturated edge. It's what stops a pale wash from
                         // reading as a rounded rectangle that happens to be
-                        // tinted, and it's where the eye measures from.
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: 14,
-                            bottomLeadingRadius: 14,
-                            style: .continuous
-                        )
-                        .fill(slice.kind.tint)
-                        .frame(width: 4)
+                        // tinted, and it's where the eye measures from. Plain
+                        // rectangle: rounding this at the row's own radius (14)
+                        // is more than its 4pt width, so it bulged into a pill
+                        // instead of a line. The outer clipShape already curves
+                        // it at the row's corners.
+                        Rectangle()
+                            .fill(slice.kind.tint)
+                            .frame(width: 4)
                     }
                     .frame(width: max(4, proxy.size.width * (drawn ? fraction : 0)))
                     .animation(

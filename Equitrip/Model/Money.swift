@@ -24,6 +24,27 @@ enum Money {
         return magnitude
     }
 
+    /// One person's cut of an even split, in whole units only. Nobody settles
+    /// ₹333.33 — they settle ₹333 — so a split never produces paise or cents.
+    /// Whatever the whole shares leave over goes to one person (see
+    /// `evenSplit`), which is what keeps every booking summing to its cost.
+    static func wholeShare(of cost: Double, heads: Int) -> Double {
+        guard heads > 0 else { return 0 }
+        let each = (abs(cost) / Double(heads)).rounded(.down)
+        return cost < 0 ? -each : each
+    }
+
+    /// `cost` across `heads` people in whole units. Everyone gets
+    /// `wholeShare`; the leftover (under one unit per head, plus any fraction
+    /// already in the cost) lands on `holder`, so the parts add up exactly.
+    static func evenSplit(_ cost: Double, heads: Int, holder: Int = 0) -> [Double] {
+        guard heads > 0 else { return [] }
+        let each = wholeShare(of: cost, heads: heads)
+        var parts = Array(repeating: each, count: heads)
+        parts[min(max(holder, 0), heads - 1)] += cost - each * Double(heads)
+        return parts
+    }
+
     /// The bare number, for a text field somebody is about to edit.
     /// `480` rather than `480.0`, `479.5` rather than `479.50` — a grouping
     /// separator or a trailing zero in a `.decimalPad` field is one more thing

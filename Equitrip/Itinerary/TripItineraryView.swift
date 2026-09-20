@@ -53,6 +53,7 @@ struct TripItineraryView: View {
     @State private var coverTint: Color?
     @State private var reviewingDeparture: TripDeparture?
     @State private var viewingStatement: TripDeparture?
+    @State private var showRecap = false
 
     /// The trip's two faces. Not two destinations — the plan and its money are
     /// the same trip asked two different questions, and making the money a tab
@@ -88,8 +89,10 @@ struct TripItineraryView: View {
         }
         // An overlay rather than a `safeAreaInset`: the timeline scrolls
         // underneath it and the hero runs up behind it, which a top inset
-        // would make impossible.
-        .scrollEdgeEffectStyle(.soft, for: .top)
+        // would make impossible. No scroll edge effect here, unlike other
+        // top bars: the floating bar is glass buttons, not a bar spanning
+        // the width, so the system's soft blur has nothing to pair against
+        // and instead washes out the status bar on its own.
         .overlay(alignment: .top) {
             // The iPad sheet carries its own actions; the floating bar is the
             // phone's, where there's no panel to put them in.
@@ -99,21 +102,11 @@ struct TripItineraryView: View {
         .sheet(isPresented: $showTravellers) {
             if let trip {
                 TravellerPickerSheet(
-                    travellers: Binding(
-                        get: { trip.travellers },
-                        // Removals only. Somebody joining a trip that exists
-                        // now goes through `onInvite` — an addition can't
-                        // arrive here any more, and the arrival announcement
-                        // that used to live on this setter moved with it, to
-                        // `announceInvitation`. Writing straight through keeps
-                        // this the plain "the roster changed" path it reads as.
-                        set: { updated in
-                            var copy = trip
-                            copy.travellers = updated
-                            copy.invitedIDs = copy.invitedIDs.intersection(updated.map(\.id))
-                            store.update(copy)
-                        }
-                    ),
+                    // Read-only. People join through `onInvite` and leave
+                    // through `onLeave`; the roster is never written back
+                    // wholesale, because a stale copy of it deleted whoever had
+                    // joined since (`TripStore.update` ignores it now anyway).
+                    travellers: .constant(trip.travellers),
                     organiserIDs: trip.youAreOrganiser
                         ? Binding(
                             get: { trip.organiserIDs },
@@ -149,6 +142,9 @@ struct TripItineraryView: View {
         }
         .sheet(item: $viewingStatement) { departure in
             if let trip { DepartureStatementSheet(trip: trip, departure: departure) }
+        }
+        .fullScreenCover(isPresented: $showRecap) {
+            if let trip { TripRecapView(trip: trip) }
         }
         .fullScreenCover(isPresented: $showChat, onDismiss: { chatDraft = "" }) {
             if let trip { TripChatView(trip: trip, draft: chatDraft) }
@@ -302,6 +298,14 @@ struct TripItineraryView: View {
                 banner(for: trip)
 
                 VStack(alignment: .leading, spacing: 0) {
+                    // Once a trip is over the recap is the new thing on it, so
+                    // it goes above the plan rather than at the foot of it.
+                    if trip.phase == .past {
+                        TripRecapEntryCard(trip: trip) { showRecap = true }
+                            .padding(.horizontal, 20)
+                            .padding(.top, 16)
+                    }
+
                     Picker("Section", selection: $section) {
                         Text("Timeline").tag(Section.timeline)
                         Text("Ledger").tag(Section.ledger)
@@ -381,6 +385,11 @@ struct TripItineraryView: View {
 
                 sheetIdentity(for: trip)
                     .padding(.top, 18)
+
+                if trip.phase == .past {
+                    TripRecapEntryCard(trip: trip) { showRecap = true }
+                        .padding(.top, 18)
+                }
 
                 sheetFacts(for: trip)
                     .padding(.top, 18)
@@ -536,7 +545,7 @@ struct TripItineraryView: View {
     private func sheetIdentity(for trip: Trip) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(trip.title)
-                .font(AppTheme.display(28))
+                .tripTitle(trip.titleStyle, size: 28)
                 .foregroundStyle(AppTheme.ink)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
@@ -817,7 +826,7 @@ struct TripItineraryView: View {
             .foregroundStyle(.white.opacity(0.85))
 
             Text(trip.title)
-                .font(AppTheme.display(27))
+                .tripTitle(trip.titleStyle, size: 27)
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)

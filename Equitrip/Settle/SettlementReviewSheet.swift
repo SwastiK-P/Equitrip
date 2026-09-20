@@ -193,7 +193,6 @@ struct SettlementReviewSheet: View {
             .padding(.horizontal, 20)
             .padding(.top, 14)
             .padding(.bottom, 22)
-            .opacity(isResponding ? 0.5 : 1)
             .allowsHitTesting(!isResponding)
         }
         .background(.ultraThinMaterial)
@@ -204,6 +203,9 @@ struct SettlementReviewSheet: View {
         // The slide itself already gave the haptic and the landing animation
         // — firing another here on top would double up the confirmation.
         store.respondToSettlement(settlement, with: status, in: trip.id)
-        dismiss()
+        Task { @MainActor in
+            try? await Task.sleep(for: SlideToRespond.landingHold)
+            dismiss()
+        }
     }
 }
