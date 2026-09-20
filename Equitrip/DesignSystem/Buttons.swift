@@ -25,6 +25,9 @@ struct PrimaryButton: View {
     var systemImage: String? = "arrow.right"
     var isLoading: Bool = false
     var isEnabled: Bool = true
+    /// Fully rounded ends. Onboarding's buttons use it; the app's forms keep
+    /// the 18pt corner that matches their fields.
+    var capsule: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -52,7 +55,7 @@ struct PrimaryButton: View {
             .foregroundStyle(AppTheme.ctaLabel)
             .frame(maxWidth: .infinity)
             .frame(height: 56)
-            .background(AppTheme.cta, in: .rect(cornerRadius: 18))
+            .background(AppTheme.cta, in: .rect(cornerRadius: capsule ? 28 : 18))
             .shadow(color: AppTheme.softShadow(scheme), radius: 18, y: 8)
         }
         .buttonStyle(PressableButtonStyle())

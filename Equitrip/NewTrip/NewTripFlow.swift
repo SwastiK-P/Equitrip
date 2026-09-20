@@ -413,12 +413,6 @@ private struct TripSourceStage: View {
                         Text("Import a document")
                             .font(.system(size: 18, weight: .bold, design: .rounded))
                             .foregroundStyle(AppTheme.ink)
-
-                        Spacer(minLength: 4)
-
-                        if availability.isReady {
-                            TagChip(title: "Apple Intelligence", symbol: "sparkles")
-                        }
                     }
 
                     Text("Drop in a booking PDF — flights, stays and activities come out the other side.")

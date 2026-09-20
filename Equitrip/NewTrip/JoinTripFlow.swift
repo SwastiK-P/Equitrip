@@ -365,7 +365,7 @@ struct JoinTripFlow: View {
         error = nil
 
         Task {
-            let outcome = await store.join(trip.id)
+            let outcome = await store.join(trip.id, code: code)
             isWorking = false
 
             switch outcome {

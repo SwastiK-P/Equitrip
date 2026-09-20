@@ -39,7 +39,7 @@ struct ItineraryItemEditor: View {
         onDelete: (() -> Void)? = nil
     ) {
         _draft = State(initialValue: item)
-        _costText = State(initialValue: item.cost > 0 ? String(format: "%.0f", item.cost) : "")
+        _costText = State(initialValue: item.cost > 0 ? Money.plainAmount(item.cost) : "")
         _hasTime = State(initialValue: item.time != nil)
         _flightNumberText = State(initialValue: item.flight?.number ?? "")
         self.travellers = travellers
@@ -745,17 +745,18 @@ struct ItineraryItemEditor: View {
     }
 
     /// Spreads whatever is unaccounted for across everyone evenly, or lays
-    /// down an even split when nothing has been typed yet. Rounding remainder
-    /// lands on the first person rather than quietly disappearing.
+    /// down an even split when nothing has been typed yet. Shares are whole
+    /// units; the remainder lands on the first person rather than quietly
+    /// disappearing.
     private func evenOut() {
         let people = chosenTravellers
         guard !people.isEmpty, targetCost > 0 else { return }
 
         if assigned == 0 {
-            let each = (targetCost / Double(people.count) * 100).rounded() / 100
+            let each = Money.wholeShare(of: targetCost, heads: people.count)
             for person in people { draft.customShares[person.id] = each }
         } else {
-            let each = (unassigned / Double(people.count) * 100).rounded() / 100
+            let each = Money.wholeShare(of: unassigned, heads: people.count)
             for person in people {
                 draft.customShares[person.id] = max(0, (draft.customShares[person.id] ?? 0) + each)
             }
@@ -860,7 +861,7 @@ struct ItineraryItemEditor: View {
         guard !draft.split.isCustom else { return nil }
         let cost = Double(costText) ?? 0
         guard cost > 0, !bearers.isEmpty else { return nil }
-        return cost / Double(bearers.count)
+        return Money.wholeShare(of: cost, heads: bearers.count)
     }
 
     // MARK: - Payment
@@ -969,6 +970,13 @@ struct ItineraryItemEditor: View {
             if !draft.split.isCustom {
                 draft.customShares = [:]
             } else {
+                // Spelled out first. "Clear" in the participant picker leaves
+                // the set empty, which means everyone: the amounts were shown,
+                // typed and checked against everyone, and filtering them by
+                // the empty set threw every one away — leaving a paid booking
+                // that nobody owed anything on. The amounts are also stored on
+                // the participant rows, so an empty set couldn't keep them.
+                draft.participantIDs = Set(chosenTravellers.map(\.id))
                 draft.customShares = draft.customShares.filter { draft.participantIDs.contains($0.key) }
             }
 

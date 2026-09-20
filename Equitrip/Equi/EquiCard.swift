@@ -192,7 +192,7 @@ private struct EquiTripCard: View {
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(trip.title)
-                        .font(AppTheme.display(19))
+                        .tripTitle(trip.titleStyle, size: 19)
                         .foregroundStyle(.white)
 
                     Text("\(trip.destination) · \(trip.dateRange)")

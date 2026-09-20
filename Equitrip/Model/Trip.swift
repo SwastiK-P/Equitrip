@@ -63,6 +63,8 @@ struct Trip: Identifiable {
     /// Resolved once from the photo service and kept, so the cover doesn't
     /// change every time the card scrolls back on screen.
     var cover: TripPhoto?
+    /// The typeface the trip's name is set in. See `TripTitleStyle`.
+    var titleStyle: TripTitleStyle
 
     /// What the bookings add up to when we can't see the bookings.
     ///
@@ -91,6 +93,7 @@ struct Trip: Identifiable {
         invitedIDs: Set<UUID> = [],
         organiserIDs: Set<UUID>? = nil,
         cover: TripPhoto? = nil,
+        titleStyle: TripTitleStyle = .classic,
         previewBookingCount: Int? = nil,
         previewCost: Double? = nil
     ) {
@@ -110,6 +113,7 @@ struct Trip: Identifiable {
         // Whoever created it organises until they add someone else.
         self.organiserIDs = organiserIDs ?? Set([travellers.first?.id].compactMap { $0 })
         self.cover = cover
+        self.titleStyle = titleStyle
         self.previewBookingCount = previewBookingCount
         self.previewCost = previewCost
     }
@@ -249,10 +253,14 @@ struct Trip: Identifiable {
             return bearers(of: item).map { ($0, item.customShares[$0.id] ?? 0) }
         }
 
+        // Whole units only. The payer carries the leftover when they're on the
+        // booking — they're owed it back anyway, so everyone else's figure
+        // stays a round number.
         let people = bearers(of: item)
         guard !people.isEmpty else { return [] }
-        let each = item.cost / Double(people.count)
-        return people.map { ($0, each) }
+        let holder = people.firstIndex { $0.id == item.paidByID } ?? 0
+        let parts = Money.evenSplit(item.cost, heads: people.count, holder: holder)
+        return zip(people, parts).map { ($0, $1) }
     }
 
     func share(of item: ItineraryItem, for travellerID: UUID) -> Double {

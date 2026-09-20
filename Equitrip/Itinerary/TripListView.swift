@@ -26,6 +26,7 @@ struct TripListView: View {
     @State private var editing: Trip?
     @State private var inviting: Trip?
     @State private var deleting: Trip?
+    @State private var recapping: Trip?
 
     var body: some View {
         ZStack {
@@ -35,7 +36,7 @@ struct TripListView: View {
                 LoadingState(message: "Loading your trips…")
             } else if store.trips.isEmpty, let failure = store.state.failure {
                 failedState(failure)
-            } else if store.trips.isEmpty {
+            } else if store.trips.allSatisfy({ $0.phase == .past }) {
                 emptyState
             } else {
                 list
@@ -60,6 +61,9 @@ struct TripListView: View {
                 onSave: { store.update($0) },
                 onDelete: trip.youAreOrganiser ? { store.delete(trip.id) } : nil
             )
+        }
+        .fullScreenCover(item: $recapping) { trip in
+            TripRecapView(trip: trip)
         }
         .sheet(item: $inviting) { trip in
             TripInviteSheet(trip: trip)
@@ -133,7 +137,7 @@ struct TripListView: View {
             LazyVStack(alignment: .leading, spacing: pane.spacing(26)) {
                 section("Happening now", trips: store.trips.filter { $0.phase == .live })
                 section("Coming up", trips: store.trips.filter { $0.phase == .upcoming })
-                section("Wrapped up", trips: store.trips.filter { $0.phase == .past })
+                wrappedUp(store.trips.filter { $0.phase == .past })
             }
             .padding(.horizontal, pane.isRegular ? pane.gutter : 16)
             .pageWidth()
@@ -163,9 +167,10 @@ struct TripListView: View {
                 CardGrid(items: trips, columns: pane.tripColumns, spacing: pane.spacing(14)) { trip in
                     TripPlaceCard(
                         trip: trip,
-                        onOpen: { store.itineraryPath.append(trip.id) },
+                        onOpen: { store.itineraryPath.append(.trip(trip.id)) },
                         onEdit: { editing = trip },
                         onInvite: { inviting = trip },
+                        onRecap: trip.phase == .past ? { recapping = trip } : nil,
                         onDelete: { deleting = trip }
                     )
                 }
@@ -173,26 +178,89 @@ struct TripListView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 14) {
-            IconTile(symbol: "map.fill", tint: AppTheme.accent, size: 58, corner: 19)
+    /// Finished trips, folded into one row that opens them.
+    ///
+    /// Past trips used to be a third section of full place cards, which put
+    /// every trip you've ever taken between you and the bottom of the list —
+    /// and the list is for what's still ahead. They're a shelf now: one row,
+    /// with the latest few covers on it so it still looks like somewhere.
+    @ViewBuilder
+    private func wrappedUp(_ trips: [Trip]) -> some View {
+        if !trips.isEmpty {
+            let recent = trips.sorted { $0.endDate > $1.endDate }
 
-            Text("No trips yet")
-                .font(AppTheme.display(24))
-                .foregroundStyle(AppTheme.ink)
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                store.itineraryPath.append(.pastTrips)
+            } label: {
+                HStack(spacing: 14) {
+                    ZStack(alignment: .leading) {
+                        ForEach(Array(recent.prefix(3).enumerated().reversed()), id: \.element.id) { index, trip in
+                            DestinationImage(
+                                query: trip.destination,
+                                photo: trip.cover,
+                                fallbackSymbol: trip.symbol,
+                                fallbackTint: trip.tint
+                            )
+                            .frame(width: 44, height: 44)
+                            .clipShape(.rect(cornerRadius: 12, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(AppTheme.card, lineWidth: 2)
+                            }
+                            .offset(x: CGFloat(index) * 16)
+                        }
+                    }
+                    .frame(width: 44 + CGFloat(min(recent.count, 3) - 1) * 16, alignment: .leading)
 
-            Text("Start one, or join a trip someone's already planning.")
-                .font(.system(size: 14))
-                .foregroundStyle(AppTheme.inkSecondary)
-                .multilineTextAlignment(.center)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Wrapped up")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("\(trips.count.pluralised("trip")) · latest \(recent[0].title)")
+                            .font(.system(size: 13))
+                            .foregroundStyle(AppTheme.inkSecondary)
+                            .lineLimit(1)
+                    }
 
-            Button("New trip") { showNewTrip = true }
-                .buttonStyle(.glassProminent)
-                .tint(AppTheme.accent)
-                .padding(.top, 4)
+                    Spacer(minLength: 6)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(AppTheme.inkTertiary)
+                }
+                .padding(12)
+                .contentShape(.rect)
+                .cardSurface(corner: 22)
+            }
+            .buttonStyle(PressableButtonStyle())
+            .accessibilityLabel("Wrapped up, \(trips.count.pluralised("trip"))")
         }
-        .padding(.horizontal, 40)
-        .readableWidth()
+    }
+
+    /// Nothing live and nothing booked — which is a different screen from an
+    /// empty account, and used to be the same one. A list whose only section
+    /// is the "Wrapped up" shelf left two thirds of the page blank with
+    /// nothing saying why, so the trips that are over keep their shelf at the
+    /// top and `NoTripsAhead` takes the space under it.
+    private var emptyState: some View {
+        let past = store.trips.filter { $0.phase == .past }.sorted { $0.endDate > $1.endDate }
+
+        return VStack(spacing: 0) {
+            NoTripsAhead(hasFinishedTrips: !past.isEmpty)
+
+            // Under the empty state rather than over it: the shelf is where
+            // the finished trips live, and above the note it looked like the
+            // page's subject rather than its footnote.
+            if !past.isEmpty {
+                wrappedUp(past)
+                    .padding(.top, 34)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, pane.isRegular ? pane.gutter : 16)
+        .pageWidth()
     }
 }
 
@@ -203,7 +271,7 @@ struct TripListView: View {
 /// The menu is an overlay rather than a child of the tap target, because a
 /// button inside a button swallows one of the two gestures — the card opens
 /// the trip, the ellipsis opens the menu, and neither has to guess.
-private struct TripPlaceCard: View {
+struct TripPlaceCard: View {
     @Environment(\.tripStore) private var store
     @Environment(\.tripZoomNamespace) private var zoom
     @Environment(\.pane) private var pane
@@ -212,6 +280,7 @@ private struct TripPlaceCard: View {
     var onOpen: () -> Void
     var onEdit: () -> Void
     var onInvite: () -> Void
+    var onRecap: (() -> Void)?
     var onDelete: (() -> Void)?
 
     /// The colour of this trip's photograph, once it has been sampled.
@@ -307,7 +376,7 @@ private struct TripPlaceCard: View {
                 .foregroundStyle(AppTheme.inkSecondary)
 
             Text(trip.title)
-                .font(AppTheme.display(30))
+                .tripTitle(trip.titleStyle, size: 30)
                 .foregroundStyle(AppTheme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -374,6 +443,10 @@ private struct TripPlaceCard: View {
     private var menu: some View {
         Menu {
             Button("Open trip", systemImage: "arrow.forward") { onOpen() }
+
+            if let onRecap {
+                Button("Trip recap", systemImage: "sparkles") { onRecap() }
+            }
 
             // Editing is the organiser's, here as everywhere else. This menu
             // was the one place that offered it to anyone: the trip screen's

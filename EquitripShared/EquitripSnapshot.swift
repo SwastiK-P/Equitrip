@@ -142,6 +142,15 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
         /// What the trip will cost you, for before it starts — when there is
         /// no balance yet and "Settled" would be a lie.
         var yourShareLabel: String?
+        /// `TripTitleStyle.rawValue` — the typeface the organiser picked for
+        /// this trip's name, so the watch sets it the way the phone does
+        /// rather than in its own serif. Nil reads as `.classic`.
+        var titleStyle: String?
+        /// "1 booking" / "9 bookings", already pluralised by the phone.
+        var bookingLabel: String?
+        /// Everything the trip is projected to cost, all travellers together —
+        /// the third figure in Home's card subtitle.
+        var projectedLabel: String?
 
         /// The trip's cover photo, the smallest size the phone has. The watch
         /// fetches and downsizes it itself — an image is far too heavy for
@@ -190,6 +199,46 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
         var shareAmountLabel: String?
         /// `BOM → BAH`, `3 of us`, or the vendor.
         var detail: String?
+
+        // The watch's booking detail: the phone's detail sheet with the
+        // editing, the receipt and the per-person working left out. Optional
+        // like every field added after the first release.
+        /// `ItineraryKind.label` — "Flight", "Stay".
+        var kindLabel: String?
+        /// Whoever paid; nil while nobody has.
+        var paidBy: Person?
+        /// "UPI", "Cash" — nil when the payer didn't say.
+        var paymentMethodLabel: String?
+        /// `SplitMode.label` and `.symbol` — "Split equally".
+        var splitLabel: String?
+        var splitSymbol: String?
+        /// "₹500 each", only under an equal split, where every share is the
+        /// same and one figure is the whole of the working.
+        var eachLabel: String?
+        /// Everyone the cost lands on, you first.
+        var participants: [Person]?
+        var isDisputed: Bool?
+
+        // A resolved flight, as the phone's ticket card lays it out.
+        var airline: String?
+        var departureCity: String?
+        var arrivalCity: String?
+        /// `6:30 AM`, formatted on the phone like its ticket card.
+        var departureTimeLabel: String?
+        var arrivalTimeLabel: String?
+        /// `FlightDetails.Status.label` — "Delayed", "In the air".
+        var flightStatus: String?
+    }
+
+    /// A traveller as a face — what the phone's `TravellerAvatar` draws from.
+    struct Person: Codable, Equatable {
+        /// "You" for the signed-in traveller.
+        var name: String
+        /// `Traveller.artwork(for:)`, already resolved — an asset name the
+        /// watch's catalogue holds a small copy of.
+        var avatar: String
+        /// A photograph they uploaded, which wins over the artwork.
+        var photoURL: URL?
     }
 
     /// One incoming "I paid you", reduced to what a row can draw and the ids
@@ -228,6 +277,9 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
             dayCount: 6,
             travellerCount: 4,
             yourShareLabel: "₹18,400",
+            titleStyle: TripTitleStyle.airy.rawValue,
+            bookingLabel: "9 bookings",
+            projectedLabel: "₹73,600",
             symbol: "beach.umbrella.fill"
         )
 
@@ -249,6 +301,9 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
             dayCount: 7,
             travellerCount: 5,
             yourShareLabel: "₹9,600",
+            titleStyle: TripTitleStyle.classic.rawValue,
+            bookingLabel: "4 bookings",
+            projectedLabel: "₹48,000",
             symbol: "mountain.2.fill"
         )
 
@@ -268,6 +323,9 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
             dayCount: 6,
             travellerCount: 3,
             yourShareLabel: "₹14,200",
+            titleStyle: TripTitleStyle.poster.rawValue,
+            bookingLabel: "1 booking",
+            projectedLabel: "₹42,600",
             symbol: "sailboat.fill"
         )
 
@@ -291,12 +349,21 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
                       symbol: "figure.hiking", kind: "activity", date: .now,
                       clockValue: "4:30", clockMeridiem: "PM",
                       costLabel: "₹3,200", shareLabel: "₹800 each", isToday: true,
-                      costCompactLabel: "₹3.2k", shareAmountLabel: "₹800", detail: "Palolem Beach"),
+                      costCompactLabel: "₹3.2k", shareAmountLabel: "₹800", detail: "Palolem Beach",
+                      kindLabel: "Activity", paidBy: Person(name: "Priya", avatar: "Avatar04"), paymentMethodLabel: "UPI",
+                      splitLabel: "Split equally", splitSymbol: "equal", eachLabel: "₹800 each",
+                      participants: [Person(name: "You", avatar: "Avatar01"), Person(name: "Priya", avatar: "Avatar04"),
+                                     Person(name: "Rohan", avatar: "Avatar07"), Person(name: "Ananya", avatar: "Avatar11")],
+                      isDisputed: false),
                 Event(id: UUID(), title: "Dinner at Gunpowder", vendor: "Assagao",
                       symbol: "fork.knife", kind: "meal", date: .now,
                       clockValue: "8:00", clockMeridiem: "PM",
                       costLabel: "₹4,600", shareLabel: "₹1,150 each", isToday: true,
-                      costCompactLabel: "₹4.6k", shareAmountLabel: "₹1,150", detail: "3 of us"),
+                      costCompactLabel: "₹4.6k", shareAmountLabel: "₹1,150", detail: "3 of us",
+                      kindLabel: "Food", splitLabel: "Only participants", splitSymbol: "person.2.fill",
+                      participants: [Person(name: "You", avatar: "Avatar01"), Person(name: "Priya", avatar: "Avatar04"),
+                                     Person(name: "Rohan", avatar: "Avatar07")],
+                      isDisputed: false),
                 Event(id: UUID(), title: "Check out", vendor: "Villa Kalinga",
                       symbol: "bed.double.fill", kind: "stay", date: .now,
                       clockValue: "11:00", clockMeridiem: "AM",

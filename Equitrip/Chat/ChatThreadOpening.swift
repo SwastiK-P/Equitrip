@@ -34,7 +34,7 @@ struct ChatThreadOpening: View {
                 .animation(.smooth(duration: 0.55), value: appeared)
 
             Text(trip.title)
-                .font(AppTheme.display(27))
+                .tripTitle(trip.titleStyle, size: 27)
                 .foregroundStyle(AppTheme.ink)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)

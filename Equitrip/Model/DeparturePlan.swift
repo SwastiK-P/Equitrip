@@ -216,7 +216,9 @@ struct DeparturePlan {
     /// traveller rather than computed from headcounts, so it stays right for
     /// custom splits and for bookings only some of the group is on.
     private func othersDelta(for item: ItineraryItem, base: Trip, preview: Trip) -> Double {
-        guard let other = base.bearers(of: item).first(where: { $0.id != traveller.id }) else { return 0 }
+        // Skip the payer where possible: they carry the split's leftover unit.
+        let others = base.bearers(of: item).filter { $0.id != traveller.id }
+        guard let other = others.first(where: { $0.id != item.paidByID }) ?? others.first else { return 0 }
         guard let updated = preview.items.first(where: { $0.id == item.id }) else { return 0 }
 
         let delta = preview.share(of: updated, for: other.id) - base.share(of: item, for: other.id)

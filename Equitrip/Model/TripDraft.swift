@@ -25,6 +25,7 @@ struct TripDraft {
     var travellers: [Traveller] = [.you]
     var items: [ItineraryItem] = []
     var cover: TripPhoto?
+    var titleStyle: TripTitleStyle = .classic
 
     /// Whether the on-device model produced this, for the review screen's note.
     var wasImported = false
@@ -110,7 +111,8 @@ struct TripDraft {
             tint: inferredTint,
             travellers: travellers,
             items: resolved,
-            cover: cover
+            cover: cover,
+            titleStyle: titleStyle
         )
     }
 

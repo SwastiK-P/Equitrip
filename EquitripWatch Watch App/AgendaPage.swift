@@ -230,7 +230,7 @@ private struct EventRow: View {
         .padding(.leading, 4)
         .padding(.trailing, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Brand.card, in: .rect(cornerRadius: 20, style: .continuous))
+        .background(Color.watchCard, in: .rect(cornerRadius: 20, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }

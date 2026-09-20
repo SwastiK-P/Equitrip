@@ -20,8 +20,10 @@ import SwiftUI
 
 // MARK: - Card
 
-/// The warm surface every group of content sits on — `Brand.card`, which on
-/// the watch is always its dark value.
+/// The surface every group of content sits on: a neutral grey rather than
+/// the phone's warm `Brand.card`. On the watch that value comes out brown,
+/// and every page here sits on a tint of its own — indigo for money, a
+/// booking's kind colour on its detail — which the brown fought on each one.
 ///
 /// A generous fixed radius, close to the screen's own curve. (A
 /// `ContainerRelativeShape` would be the principled way to echo it, but with
@@ -29,7 +31,7 @@ import SwiftUI
 /// rectangle and the corners square off.)
 struct WatchCard: ViewModifier {
     var padding: CGFloat = 10
-    var fill: Color = Brand.card
+    var fill: Color = .watchCard
 
     func body(content: Content) -> some View {
         content
@@ -39,16 +41,37 @@ struct WatchCard: ViewModifier {
     }
 }
 
+extension Color {
+    /// `WatchCard`'s fill, for anything drawn to match it — an avatar's ring,
+    /// a row laid out by hand.
+    static let watchCard = Color(white: 0.17)
+}
+
 extension View {
-    func watchCard(padding: CGFloat = 10, fill: Color = Brand.card) -> some View {
+    func watchCard(padding: CGFloat = 10, fill: Color = .watchCard) -> some View {
         modifier(WatchCard(padding: padding, fill: fill))
     }
 
     /// The tint the HIG asks for behind a screen: "use background content
     /// such as color to convey useful supporting information". One colour per
     /// page, so turning the crown between them is visible at a glance.
-    func watchPageTint(_ color: Color) -> some View {
-        containerBackground(color.opacity(0.28).gradient, for: .navigation)
+    ///
+    /// `intensity` is the colour's opacity at the top of the gradient. A
+    /// booking's own screen runs stronger than the pages: its colour *is* the
+    /// booking's kind, and there's no neighbouring page to tell it apart from.
+    ///
+    /// `placement` is `.tabView` for the crown's pages and `.navigation` only
+    /// for a screen pushed on top of them. A page's background has to belong
+    /// to the page: set on the navigation container — which every page shares
+    /// — the previous page's background stayed up while the next page scrolled
+    /// in over it, and only swapped once the scroll had settled. `.tabView`
+    /// backgrounds travel with their page and cross-fade as the crown turns.
+    func watchPageTint(
+        _ color: Color,
+        intensity: Double = 0.28,
+        placement: ContainerBackgroundPlacement = .tabView
+    ) -> some View {
+        containerBackground(color.opacity(intensity).gradient, for: placement)
     }
 }
 
@@ -93,6 +116,9 @@ struct SplitCells: View {
 struct DayTrack: View {
     let progress: Double
     let days: Int
+    /// White on the trip page's glass, where the accent loses against a
+    /// photograph; the accent everywhere it sits on the card surface.
+    var tint: Color = Brand.accent
 
     @ScaledMetric(relativeTo: .caption2) private var height: CGFloat = 5
 
@@ -110,7 +136,7 @@ struct DayTrack: View {
         HStack(spacing: 2.5) {
             ForEach(0..<count, id: \.self) { index in
                 Capsule()
-                    .fill(index < filled ? Brand.accent : Color.white.opacity(0.14))
+                    .fill(index < filled ? tint : Color.white.opacity(0.22))
                     .frame(maxWidth: .infinity)
             }
         }
@@ -236,6 +262,47 @@ struct InitialDisc: View {
             .foregroundStyle(Brand.accent)
             .frame(width: size, height: size)
             .background(Brand.accent.opacity(0.2), in: .circle)
+            .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Avatar
+
+/// A traveller's own face — the phone's `TravellerAvatar` on the wrist: their
+/// photograph when they've uploaded one, their chosen artwork otherwise.
+///
+/// The artwork comes from the watch's catalogue, which holds 120px copies of
+/// the phone's set (`scripts/watch-avatars.sh`); photographs go through the
+/// same fetch-once, shrink-once cache as trip covers.
+struct WatchAvatar: View {
+    let person: EquitripSnapshot.Person
+    var size: CGFloat
+    /// The ring around the face, in whatever it sits on, so overlapping
+    /// faces stay separate rather than merging into one blob.
+    var ring: Color = .watchCard
+
+    @State private var photo: UIImage?
+
+    var body: some View {
+        Image(person.avatar)
+            .resizable()
+            .scaledToFill()
+            .overlay {
+                if let photo {
+                    Image(uiImage: photo)
+                        .resizable()
+                        .scaledToFill()
+                        .transition(.opacity)
+                }
+            }
+            .frame(width: size, height: size)
+            .clipShape(.circle)
+            .overlay { Circle().strokeBorder(ring, lineWidth: 1.5) }
+            .task(id: person.photoURL) {
+                guard let url = person.photoURL else { photo = nil; return }
+                let loaded = await CoverCache.shared.image(for: url)
+                withAnimation(.easeOut(duration: 0.25)) { photo = loaded }
+            }
             .accessibilityHidden(true)
     }
 }

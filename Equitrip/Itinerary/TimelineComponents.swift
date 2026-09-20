@@ -371,7 +371,9 @@ struct TimelineRow: View {
         case .organiser, .individual:
             return item.split.label
         default:
-            guard let each = trip.shares(of: item).first?.amount else { return item.split.label }
+            let heads = trip.shares(of: item).count
+            guard heads > 0 else { return item.split.label }
+            let each = Money.wholeShare(of: item.cost, heads: heads)
             return "\(Money.format(each, code: trip.currencyCode)) each"
         }
     }

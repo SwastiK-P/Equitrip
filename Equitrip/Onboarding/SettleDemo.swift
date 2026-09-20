@@ -87,7 +87,6 @@ struct SettleDemo {
         self.expenses = expenses
 
         let total = expenses.reduce(0) { $0 + $1.amount }
-        let share = people.isEmpty ? 0 : total / Double(people.count)
 
         // The demo splits everything across the whole group, so one share
         // each. Anything cleverer belongs in `Trip`, which already has it.
@@ -98,7 +97,11 @@ struct SettleDemo {
             )
         }
         let byID = Dictionary(uniqueKeysWithValues: people.map { ($0.id, $0) })
-        let balances = Dictionary(uniqueKeysWithValues: laidOut.map { ($0.person.id, $0.amount - share) })
+        // Whole shares, with the leftover on whoever laid out the most, so the
+        // balances still net to zero.
+        let holder = laidOut.indices.max { laidOut[$0].amount < laidOut[$1].amount } ?? 0
+        let shares = Money.evenSplit(total, heads: people.count, holder: holder)
+        let balances = Dictionary(uniqueKeysWithValues: zip(laidOut, shares).map { ($0.person.id, $0.amount - $1) })
 
         self.paid = laidOut.sorted { $0.amount > $1.amount }
         // The real minimiser, not a copy of it — see `SettlementEngine`, which

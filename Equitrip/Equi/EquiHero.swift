@@ -37,12 +37,17 @@ enum EquiHand {
 
 // MARK: - Arrow
 
-/// The little curved arrow that connects a margin note to the scene.
+/// The little curved arrow that connects a margin note to whatever it's
+/// about.
 ///
 /// Points are given in the unit square so a caller places the whole gesture in
 /// the same coordinate space it places the note — the arrow and its label stay
 /// together at any width, which is the entire job.
-private struct EquiHandArrow: Shape {
+///
+/// Shared with `EquiHand` rather than private to this file: the Trips tab
+/// pencils a note at its own new-trip button, and a second hand-drawn arrow
+/// with its own bow and its own arrowhead would be a second hand.
+struct EquiHandArrow: Shape {
     var from: CGPoint
     var to: CGPoint
     /// The quadratic control point. Pulling it off the straight line between

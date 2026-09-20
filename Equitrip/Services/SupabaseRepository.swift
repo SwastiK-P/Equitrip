@@ -61,11 +61,16 @@ final class SupabaseRepository {
     enum RepositoryError: LocalizedError {
         case notSignedIn
         case schemaMissing
+        /// A write that matched no row. Row-level security refuses an update
+        /// or delete by filtering it down to nothing rather than by raising,
+        /// so an empty result is the only sign it didn't happen.
+        case nothingChanged
 
         var errorDescription: String? {
             switch self {
             case .notSignedIn: "You're not signed in."
             case .schemaMissing: "The database schema hasn't been created yet."
+            case .nothingChanged: "It had already changed, or you're not allowed to change it."
             }
         }
     }
@@ -188,8 +193,6 @@ final class SupabaseRepository {
             .from("trips").select().in("id", values: tripIDs).execute().value
         async let memberRows: [TripMemberRow] = client
             .from("trip_members").select().in("trip_id", values: tripIDs).execute().value
-        async let profileRows: [ProfileRow] = client
-            .from("profiles").select().execute().value
         async let itemRows: [ItemRow] = client
             .from("itinerary_items").select().in("trip_id", values: tripIDs).execute().value
         // Kicked off alongside the rest, but awaited separately below with
@@ -202,7 +205,8 @@ final class SupabaseRepository {
         async let departureRows: [DepartureRow] = client
             .from("trip_departures").select().in("trip_id", values: tripIDs).execute().value
 
-        let (trips, members, profiles, items) = try await (tripRows, memberRows, profileRows, itemRows)
+        let (trips, members, items) = try await (tripRows, memberRows, itemRows)
+        let profiles = try await profiles(of: members)
         let settlements = (try? await settlementRows) ?? []
         let departures = (try? await departureRows) ?? []
 
@@ -220,6 +224,18 @@ final class SupabaseRepository {
             departures: departures,
             me: profile
         )
+    }
+
+    /// The people behind a set of memberships, and nobody else.
+    ///
+    /// This used to read every row in `profiles` on every sync — the whole
+    /// user base, UPI IDs included. Row-level security now only returns people
+    /// you share a trip with (`0020_rls_hardening.sql`), and asking for exactly
+    /// those keeps the read from growing with everyone else's sign-ups.
+    private func profiles(of members: [TripMemberRow]) async throws -> [ProfileRow] {
+        let ids = Array(Set(members.map(\.profile_id)))
+        guard !ids.isEmpty else { return [] }
+        return try await client.from("profiles").select().in("id", values: ids).execute().value
     }
 
     /// Rebuilds the object graph the UI works in from seven flat tables.
@@ -272,22 +288,17 @@ final class SupabaseRepository {
 
     // MARK: - Writes
 
-    /// Writes a trip and its membership.
+    /// Saves a brand-new trip and puts its starting roster on it.
     ///
-    /// Throws. Every one of these used to be a `try?`, which meant a trip that
-    /// failed to save looked exactly like one that saved — right up until the
-    /// next sync replaced it with the server's version of reality, in which it
-    /// had never existed. A write that fails has to say so.
-    func upsertTrip(_ trip: Trip) async throws {
+    /// A plain insert for the people, not an upsert. An upsert makes Postgres
+    /// read each new row back through row-level security, and a fellow
+    /// traveller's row on a trip that has no members yet isn't readable by
+    /// anyone. `members_insert` allows this roster once, while the trip is
+    /// still empty — see `can_seed_trip` in `0020_rls_hardening.sql`.
+    func createTrip(_ trip: Trip) async throws {
         let profile = try await resolveProfile()
-
-        // A traveller added by hand — an invitee typed into the picker — has
-        // no `profiles` row of their own. Without this, `trip_members` and
-        // later `messages` inserts fail their foreign key against someone who,
-        // as far as the server knows, doesn't exist.
         try await ensureProfiles(for: trip.travellers, excluding: profile)
-
-        try await client.from("trips").upsert(TripRow(trip: trip, createdBy: profile)).execute()
+        try await client.from("trips").upsert(TripRow(trip: trip, createdBy: profile), returning: .minimal).execute()
 
         let members = trip.travellers.map {
             TripMemberWrite(
@@ -296,42 +307,78 @@ final class SupabaseRepository {
                 role: trip.organiserIDs.contains($0.id) ? "organiser" : "traveller"
             )
         }
-        try await client.from("trip_members").upsert(members).execute()
-
-        // Everyone who is no longer on the trip. An upsert only ever adds and
-        // updates, so without this a traveller taken off the trip stays in
-        // `trip_members` — removed on the screen, still there in the table,
-        // and back again the moment the next sync reads membership from the
-        // server. Nobody trusts a removal that undoes itself.
-        //
-        // Guarded on a non-empty roster: `not.in.()` is not a filter the
-        // server would accept, and a trip with no members is a bug elsewhere
-        // rather than an instruction to empty the table.
         guard !members.isEmpty else { return }
-        let keep = members.map(\.profile_id.uuidString).joined(separator: ",")
+        try await client.from("trip_members").insert(members).execute()
+    }
+
+    /// Saves edits to a trip that already exists: its own details, and the
+    /// organiser changes made since `before`.
+    ///
+    /// Never adds or removes anybody. This used to write the whole local
+    /// roster back and delete every member missing from it, so an organiser
+    /// whose copy predated someone joining by code removed that person from
+    /// the trip by renaming it — and re-added, as active, anyone who had
+    /// declined in the meantime. People arrive through `invite` or
+    /// `join(code:)` and go through `trip_departures`; this only moves roles,
+    /// and only the ones that actually changed, so a stale copy can't undo
+    /// somebody else's promotion either.
+    ///
+    /// Throws. Every one of these used to be a `try?`, which meant a trip that
+    /// failed to save looked exactly like one that saved — right up until the
+    /// next sync replaced it with the server's version of reality. A write
+    /// that fails has to say so.
+    func updateTrip(_ trip: Trip, from before: Trip) async throws {
+        let profile = try await resolveProfile()
+        try await client.from("trips").upsert(TripRow(trip: trip, createdBy: profile), returning: .minimal).execute()
+
+        let promoted = trip.organiserIDs.subtracting(before.organiserIDs)
+        let demoted = before.organiserIDs.subtracting(trip.organiserIDs)
+
+        // Promotions first. An organiser handing the role over and dropping
+        // their own in one save would otherwise no longer be allowed to make
+        // the promotion by the time it ran.
+        if !promoted.isEmpty { try await setRole("organiser", of: promoted, tripID: trip.id) }
+        if !demoted.isEmpty { try await setRole("traveller", of: demoted, tripID: trip.id) }
+    }
+
+    private func setRole(_ role: String, of profileIDs: Set<UUID>, tripID: UUID) async throws {
         try await client
             .from("trip_members")
-            .delete()
-            .eq("trip_id", value: trip.id)
-            .not("profile_id", operator: .in, value: "(\(keep))")
+            .update(["role": AnyJSON.string(role)], returning: .minimal)
+            .eq("trip_id", value: tripID)
+            .in("profile_id", values: Array(profileIDs))
             .execute()
     }
 
     /// Backfills a `profiles` row for every traveller that doesn't have one.
-    /// `ignoreDuplicates` so this never clobbers a real account's row — the
-    /// signed-in user's own profile (passed as `excluding`) is skipped
-    /// entirely, and everyone else only gets inserted if they're missing.
+    /// Only missing rows are written, so this never clobbers a real account's
+    /// row — the signed-in user's own profile (passed as `excluding`) is
+    /// skipped entirely.
     private func ensureProfiles(for travellers: [Traveller], excluding: UUID) async throws {
         // Anyone added by email already has a row — `invite_traveller` made it,
         // and its display name is theirs. Only a traveller from somewhere else
-        // needs backfilling, and even then `ignoreDuplicates` keeps this from
-        // ever writing over a real account's name.
-        let rows = travellers
-            .filter { $0.id != excluding && $0.email == nil }
+        // needs backfilling.
+        let candidates = travellers.filter { $0.id != excluding && $0.email == nil }
+        guard !candidates.isEmpty else { return }
+
+        // Look first, then insert, rather than upsert with `ignoreDuplicates`:
+        // an upsert reads each new row back through row-level security, and a
+        // placeholder for somebody who isn't on any of your trips yet isn't
+        // readable, so the whole write was refused.
+        let existing: [ProfileIDRow] = try await client
+            .from("profiles")
+            .select("id")
+            .in("id", values: candidates.map(\.id))
+            .execute()
+            .value
+        let known = Set(existing.map(\.id))
+
+        let rows = candidates
+            .filter { !known.contains($0.id) }
             .map { ProfileRow(id: $0.id, user_id: nil, display_name: $0.name, avatar_asset: $0.asset) }
         guard !rows.isEmpty else { return }
 
-        try await client.from("profiles").upsert(rows, ignoreDuplicates: true).execute()
+        try await client.from("profiles").insert(rows).execute()
     }
 
     /// Writes a whole itinerary at once.
@@ -422,13 +469,20 @@ final class SupabaseRepository {
         guard !normalised.isEmpty else { return nil }
 
         do {
+            // Functions, not the tables: somebody who isn't on the trip can't
+            // read `trips`, `trip_members` or its people's profiles, and the
+            // code is what admits them to this one — see
+            // `0020_rls_hardening.sql`.
             let rows: [TripRow] = try await client
-                .from("trips").select().eq("invite_code", value: normalised).limit(1).execute().value
+                .rpc("trip_by_code", params: ["p_code": normalised])
+                .execute()
+                .value
             guard let row = rows.first else { return nil }
 
-            let members: [TripMemberRow] = try await client
-                .from("trip_members").select().eq("trip_id", value: row.id).execute().value
-            let profiles: [ProfileRow] = try await client.from("profiles").select().execute().value
+            let people: [TripPreviewPersonRow] = try await client
+                .rpc("trip_people_by_code", params: ["p_code": normalised])
+                .execute()
+                .value
             // Not `from("itinerary_items")`: that read is scoped to trip
             // members by RLS, and the whole point of this screen is that the
             // person looking isn't one yet. It came back empty every time, so
@@ -440,11 +494,10 @@ final class SupabaseRepository {
                 .value
 
             let me = currentProfileID ?? UUID()
-            let byID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0.asTraveller(currentProfile: me)) })
 
             var trip = row.asTrip(
-                travellers: members.compactMap { byID[$0.profile_id] },
-                organiserIDs: Set(members.filter { $0.role == "organiser" }.map(\.profile_id)),
+                travellers: people.map { $0.profile.asTraveller(currentProfile: me) },
+                organiserIDs: Set(people.filter { $0.role == "organiser" }.map(\.profile_id)),
                 items: []
             )
 
@@ -458,37 +511,25 @@ final class SupabaseRepository {
         }
     }
 
-    /// Adds the signed-in user to a trip. Returns false when they were
-    /// already on it.
+    /// Adds the signed-in user to the trip an invite code opens. Returns false
+    /// when they were already on it.
     ///
-    /// Checks membership first rather than relying on the upsert's conflict
-    /// clause, because that clause is an UPDATE — re-joining a trip you
-    /// organise would quietly demote you to 'traveller'. `ignoreDuplicates`
-    /// backs that up against the race between the check and the write.
+    /// Through `join_trip` rather than a write to `trip_members`. Letting
+    /// anyone insert their own membership row is how anyone could put
+    /// themselves on any trip, as its organiser; the function checks the code
+    /// and only ever adds a traveller. An outstanding invitation to the same
+    /// trip is accepted along the way — typing the code is the acceptance.
     @discardableResult
-    func join(tripID: UUID) async throws -> Bool {
-        let profile = try await resolveProfile()
+    func join(code: String) async throws -> Bool {
+        // Makes sure a profile exists: the function joins *that* profile.
+        try await resolveProfile()
 
-        let existing: [TripMemberRow] = try await client
-            .from("trip_members")
-            .select()
-            .eq("trip_id", value: tripID)
-            .eq("profile_id", value: profile)
-            .limit(1)
+        let result: [JoinTripRow] = try await client
+            .rpc("join_trip", params: ["p_code": Trip.normaliseCode(code)])
             .execute()
             .value
 
-        guard existing.isEmpty else { return false }
-
-        try await client
-            .from("trip_members")
-            .upsert(
-                TripMemberWrite(trip_id: tripID, profile_id: profile, role: "traveller"),
-                ignoreDuplicates: true
-            )
-            .execute()
-
-        return true
+        return result.first?.joined ?? false
     }
 
     func setCover(_ url: String, tripID: UUID) async {
@@ -557,10 +598,9 @@ final class SupabaseRepository {
             .from("trips").select().in("id", values: tripIDs).execute().value
         async let memberRows: [TripMemberRow]? = try? await client
             .from("trip_members").select().in("trip_id", values: tripIDs).execute().value
-        async let profileRows: [ProfileRow]? = try? await client
-            .from("profiles").select().execute().value
 
-        guard let trips = await tripRows, let members = await memberRows, let profiles = await profileRows
+        guard let trips = await tripRows, let members = await memberRows,
+              let profiles = try? await profiles(of: members)
         else { return [] }
 
         let byID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0.asTraveller(currentProfile: profile)) })
@@ -631,6 +671,26 @@ final class SupabaseRepository {
             .eq("trip_id", value: tripID)
             .eq("profile_id", value: profile)
             .execute()
+    }
+
+    /// An organiser taking back an invitation nobody has answered yet.
+    ///
+    /// Keyed on the invitee, never the caller. This used to go through
+    /// `declineInvitation`, which deletes the *signed-in* user's row — so
+    /// withdrawing someone's invitation deleted the organiser's own membership
+    /// and lost them the trip, while the invitation stayed open.
+    /// `status = invited` keeps it from removing anyone who has since accepted.
+    func withdrawInvitation(of profileID: UUID, tripID: UUID) async throws {
+        let removed: [TripMemberRow] = try await client
+            .from("trip_members")
+            .delete()
+            .eq("trip_id", value: tripID)
+            .eq("profile_id", value: profileID)
+            .eq("status", value: "invited")
+            .execute()
+            .value
+
+        guard !removed.isEmpty else { throw RepositoryError.nothingChanged }
     }
 
     /// Declining removes the row outright. Nothing to preserve — they were

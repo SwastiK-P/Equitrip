@@ -20,7 +20,10 @@ import SwiftUI
 /// 4. **Check** — `ReceiptReconciler` makes the numbers agree. When neither
 ///    reading adds up, the page is read a second time with language
 ///    correction off, those readings join the alternatives, and the whole
-///    thing is tried again.
+///    thing is tried again. If it still doesn't add up, or no prices were
+///    found at all, `ReceiptGlance` looks at the picture itself to ask
+///    whether it's a receipt, so an offer poster's two prices don't become
+///    an expense.
 ///
 /// Everything happens on this device. The only thing that ever leaves it is
 /// the photo, uploaded with the expense it seeds.
@@ -53,6 +56,13 @@ final class ReceiptReader {
     private(set) var result: ReceiptScan?
     private(set) var failure: String?
     private(set) var isTakingSecondLook = false
+    /// What the picture looked like to Apple Intelligence, when it was asked.
+    private(set) var sight: PictureKind?
+    /// A reading put aside because the picture didn't look like a receipt.
+    /// The model can be wrong, so `readAnyway()` can bring it back.
+    private var setAside: ReceiptScan?
+
+    var canReadAnyway: Bool { setAside != nil }
 
     var usesModel: Bool { ReceiptInterpreter.isAvailable }
 
@@ -60,6 +70,8 @@ final class ReceiptReader {
         stage = .straightening
         failure = nil
         result = nil
+        sight = nil
+        setAside = nil
 
         var readable: [CGImage] = []
         for capture in captures {
@@ -109,12 +121,45 @@ final class ReceiptReader {
         }
 
         guard let best, !(best.lines.isEmpty && best.total == nil) else {
-            failure = "Couldn't find any prices on that. A receipt photographed flat, filling the frame, reads best."
+            // Text but no prices. Worth knowing what it was before advising a
+            // better photo: no photo of a menu will ever read as a bill.
+            if let kind = await glance(), !kind.isReceipt {
+                failure = kind.refusal
+            } else {
+                failure = "Couldn't find any prices on that. A receipt photographed flat, filling the frame, reads best."
+            }
+            return
+        }
+
+        // Prices that come to their total are a receipt; nothing to ask. The
+        // picture is only looked at when they don't, which is also when an
+        // offer poster or a menu would otherwise become an expense.
+        if !best.check.addsUp, let kind = await glance(), !kind.isReceipt {
+            setAside = best
+            failure = kind.refusal
             return
         }
 
         result = best
         stage = .finished
+    }
+
+    /// Takes a reading put aside by `ReceiptGlance`, for when the person can
+    /// see it's a receipt and the model couldn't.
+    func readAnyway() {
+        guard let scan = setAside else { return }
+        setAside = nil
+        failure = nil
+        result = scan
+        stage = .finished
+    }
+
+    /// What the first page shows. Once per read: both places that ask are on
+    /// the way out.
+    private func glance() async -> PictureKind? {
+        guard let page = pages.first else { return nil }
+        sight = await ReceiptGlance.kind(of: page)
+        return sight
     }
 
     /// Rules first, then the model, and whichever of the two adds up better.

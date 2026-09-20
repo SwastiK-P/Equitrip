@@ -108,9 +108,14 @@ struct RootTabView: View {
             Tab("Itinerary", systemImage: "point.bottomleft.forward.to.point.topright.scurvepath.fill", value: AppTab.itinerary) {
                 NavigationStack(path: $store.itineraryPath) {
                     TripListView()
-                        .navigationDestination(for: UUID.self) { tripID in
-                            TripItineraryView(tripID: tripID)
-                                .tripZoomDestination(tripID, in: tripZoom)
+                        .navigationDestination(for: ItineraryRoute.self) { route in
+                            switch route {
+                            case .trip(let tripID):
+                                TripItineraryView(tripID: tripID)
+                                    .tripZoomDestination(tripID, in: tripZoom)
+                            case .pastTrips:
+                                PastTripsView()
+                            }
                         }
                 }
             }
@@ -150,7 +155,6 @@ struct RootTabView: View {
         .environment(\.tripZoomNamespace, tripZoom)
         .environment(\.detectedExpenses, detections)
         .environment(\.gmailSync, gmailSync)
-        .overlay { ToastOverlay() }
         .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
             guard AppSettings.shakeToAddExpense else { return }
 

@@ -68,7 +68,7 @@ final class TripStore {
     /// Navigation stack for the Itinerary tab. Home pushes onto this when a
     /// trip is opened from there, so "open this trip" and "browse to it" land
     /// in the same place instead of two parallel screens.
-    var itineraryPath: [UUID] = []
+    var itineraryPath: [ItineraryRoute] = []
 
     /// Who to tell when something on a trip moves.
     ///
@@ -182,7 +182,7 @@ final class TripStore {
 
         Task {
             do {
-                try await SupabaseRepository.shared.upsertTrip(trip)
+                try await SupabaseRepository.shared.createTrip(trip)
                 try await SupabaseRepository.shared.upsertItems(trip.items, tripID: trip.id)
                 unsynced.remove(trip.id)
                 writeFailure = nil
@@ -200,7 +200,7 @@ final class TripStore {
     /// Opens a trip's itinerary, replacing whatever was on the stack.
     func open(_ trip: Trip) {
         selectedTripID = trip.id
-        itineraryPath = [trip.id]
+        itineraryPath = [.trip(trip.id)]
     }
 
     /// The one trip Home leads with: what's happening now, else what's next.
@@ -220,7 +220,7 @@ final class TripStore {
 
         let removed = trips[index]
         trips.remove(at: index)
-        itineraryPath.removeAll { $0 == tripID }
+        itineraryPath.removeAll { $0 == .trip(tripID) }
         if selectedTripID == tripID { selectedTripID = currentTrip?.id ?? trips.first?.id }
 
         notifier?.announceTripDeleted(removed)
@@ -237,12 +237,34 @@ final class TripStore {
         }
     }
 
+    /// Saves an edit to a trip's details and who organises it.
+    ///
+    /// Copies those fields onto the trip as it is *now*, rather than
+    /// replacing it with what was passed in. Callers hand over an editor's
+    /// draft, taken when the sheet opened: replacing the whole trip with it
+    /// wound back every booking, settlement and member that had arrived since,
+    /// and the old write then deleted those members on the server too. The
+    /// roster isn't editable here at all — see `SupabaseRepository.updateTrip`.
     func update(_ trip: Trip) {
         guard let index = trips.firstIndex(where: { $0.id == trip.id }) else { return }
         let before = trips[index]
-        trips[index] = trip
-        auditor?.tripUpdated(from: before, to: trip)
-        write { try await SupabaseRepository.shared.upsertTrip(trip) }
+
+        var updated = before
+        updated.title = trip.title
+        updated.destination = trip.destination
+        updated.startDate = trip.startDate
+        updated.endDate = trip.endDate
+        updated.currencyCode = trip.currencyCode
+        updated.symbol = trip.symbol
+        updated.tint = trip.tint
+        updated.cover = trip.cover
+        updated.titleStyle = trip.titleStyle
+        // Only people actually on the trip can organise it.
+        updated.organiserIDs = trip.organiserIDs.intersection(before.travellers.map(\.id))
+
+        trips[index] = updated
+        auditor?.tripUpdated(from: before, to: updated)
+        write { try await SupabaseRepository.shared.updateTrip(updated, from: before) }
     }
 
     func updateItem(_ item: ItineraryItem, in tripID: UUID) {
@@ -476,10 +498,11 @@ final class TripStore {
     }
 
     /// Joins a trip for real: writes the membership, then re-reads everything
-    /// so the trip arrives with its people and bookings attached.
-    func join(_ tripID: UUID) async -> JoinOutcome {
+    /// so the trip arrives with its people and bookings attached. `code` is
+    /// the one the trip was found by — the server joins by code, not by id.
+    func join(_ tripID: UUID, code: String) async -> JoinOutcome {
         do {
-            let isNew = try await SupabaseRepository.shared.join(tripID: tripID)
+            let isNew = try await SupabaseRepository.shared.join(code: code)
             await sync()
             if isNew, let joined = trip(tripID) {
                 auditor?.memberJoined(joined, travellerCount: joined.travellers.count)
@@ -692,7 +715,7 @@ final class TripStore {
 
         Task {
             do {
-                try await SupabaseRepository.shared.declineInvitation(tripID: tripID)
+                try await SupabaseRepository.shared.withdrawInvitation(of: travellerID, tripID: tripID)
                 if let traveller { auditor?.invitationCancelled(of: traveller, in: previous) }
                 writeFailure = nil
             } catch {

@@ -42,14 +42,6 @@ struct QuickAddSheet: View {
         var paymentMethod: PaymentMethod
         /// The "how do we know this" line: bank, channel, reference.
         var provenance: String = ""
-        /// Set when the seed came off a scanned receipt, which can say what
-        /// kind of spend it was — a bank alert can't.
-        var kind: ItineraryKind?
-        /// The straightened receipt pages. Attached to the expense on save, so
-        /// the ledger row carries the paper it was read from.
-        var receiptPages: [UIImage] = []
-
-        var isReceipt: Bool { !receiptPages.isEmpty }
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -70,19 +62,6 @@ struct QuickAddSheet: View {
     @State private var payerID: UUID?
     @State private var split: SplitMode = .equal
     @FocusState private var titleFocused: Bool
-    /// A receipt's seed arrives empty and fills in on screen — see
-    /// `fillFromReceipt`. Nil once there's nothing left to play.
-    @State private var filling: FillStep? = nil
-    /// The field that just received a value, briefly outlined.
-    @State private var justFilled: FillStep?
-
-    /// The order a receipt's values land in, top of the sheet to bottom.
-    private enum FillStep: Int, Comparable {
-        case source, title, amount, done
-
-        static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
-    }
-
     /// Quick can't collect per-person amounts — that's a table, and a table is
     /// the opposite of this screen.
     private static let splits: [SplitMode] = [.equal, .participants, .organiser, .individual]
@@ -101,12 +80,10 @@ struct QuickAddSheet: View {
         self.seed = seed
         self.onSave = onSave
         self.onSwitchToDetailed = onSwitchToDetailed
-        let animates = seed?.isReceipt == true
-        _title = State(initialValue: animates ? "" : seed?.title ?? "")
+        _title = State(initialValue: seed?.title ?? "")
         // Whole rupees when it is one: "480" rather than "480.0" in a field
         // somebody may be about to edit.
-        _amount = State(initialValue: animates ? "" : seed.map { Money.plainAmount($0.amount) } ?? "")
-        _filling = State(initialValue: animates ? .source : nil)
+        _amount = State(initialValue: seed.map { Money.plainAmount($0.amount) } ?? "")
         _participants = State(initialValue: Set(travellers.map(\.id)))
         // You're the one holding the phone, having just paid for something.
         _payerID = State(initialValue: travellers.first { $0.id == Traveller.you.id }?.id)
@@ -139,10 +116,6 @@ struct QuickAddSheet: View {
         .presentationDragIndicator(.hidden)
         .presentationBackground { CanvasBackground() }
         .task {
-            if seed?.isReceipt == true {
-                await fillFromReceipt()
-                return
-            }
             // A beat, not `onAppear`. Focusing while the sheet is still
             // animating in gets dropped — the field ends up focused-but-not,
             // with no keyboard and no caret, on a screen whose entire premise
@@ -178,9 +151,7 @@ struct QuickAddSheet: View {
 
             HStack(spacing: 4) {
                 modeTab("Quick", isOn: true) {}
-                // Not while a receipt is still filling in: it would hand over
-                // an amount that's halfway through counting up.
-                modeTab("Detailed", isOn: false) { if filling == nil { onSwitchToDetailed(compose()) } }
+                modeTab("Detailed", isOn: false) { onSwitchToDetailed(compose()) }
             }
             .padding(4)
             .panelSurface(corner: 22)
@@ -219,25 +190,18 @@ struct QuickAddSheet: View {
 
     private var fields: some View {
         VStack(spacing: 12) {
-            if let provenance = seed?.provenance, !provenance.isEmpty, (filling ?? .done) > .source {
+            if let provenance = seed?.provenance, !provenance.isEmpty {
                 // Above the fields rather than below them: the first question
                 // anyone has about a pre-filled amount is where it came from,
                 // and the answer shouldn't be underneath the thing it explains.
                 HStack(spacing: 9) {
-                    if seed?.isReceipt == true {
-                        Image(systemName: "doc.text.viewfinder")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(AppTheme.accent)
-                            .frame(width: 17, height: 13)
-                    } else {
-                        GmailMark()
-                            .frame(width: 17, height: 13)
-                    }
+                    GmailMark()
+                        .frame(width: 17, height: 13)
 
                     Text(provenance)
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(AppTheme.inkSecondary)
-                        .lineLimit(seed?.isReceipt == true ? 2 : 1)
+                        .lineLimit(1)
                         .minimumScaleFactor(0.85)
 
                     Spacer(minLength: 0)
@@ -270,7 +234,6 @@ struct QuickAddSheet: View {
             .padding(.horizontal, 16)
             .frame(height: 60)
             .panelSurface(corner: 18)
-            .overlay { fillHighlight(.title) }
 
             suggestionChip
 
@@ -280,29 +243,18 @@ struct QuickAddSheet: View {
                     .foregroundStyle(AppTheme.inkTertiary)
                     .frame(width: 20)
 
-                if let filling, filling <= .amount {
-                    // A plain label while the figure counts up: a text field
-                    // can't roll its digits.
-                    Text(amount.isEmpty ? "0" : amount)
-                        .font(.system(size: 19, weight: .semibold, design: .rounded))
-                        .foregroundStyle(amount.isEmpty ? AppTheme.inkTertiary : AppTheme.ink)
-                        .contentTransition(.numericText(value: Double(amount) ?? 0))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    TextField(
-                        "",
-                        text: $amount,
-                        prompt: Text("0").foregroundColor(AppTheme.inkTertiary)
-                    )
-                    .font(.system(size: 19, weight: .semibold, design: .rounded))
-                    .foregroundStyle(AppTheme.ink)
-                    .keyboardType(.decimalPad)
-                }
+                TextField(
+                    "",
+                    text: $amount,
+                    prompt: Text("0").foregroundColor(AppTheme.inkTertiary)
+                )
+                .font(.system(size: 19, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.ink)
+                .keyboardType(.decimalPad)
             }
             .padding(.horizontal, 16)
             .frame(height: 60)
             .panelSurface(corner: 18)
-            .overlay { fillHighlight(.amount) }
         }
     }
 
@@ -315,9 +267,7 @@ struct QuickAddSheet: View {
     /// on the timeline.
     @ViewBuilder
     private var suggestionChip: some View {
-        // Not while a receipt is filling in: the title is only empty because
-        // it's about to be typed.
-        if filling == nil, let vendor = seed?.vendor, !vendor.isEmpty, !vendor.contains("@"),
+        if let vendor = seed?.vendor, !vendor.isEmpty, !vendor.contains("@"),
            title.trimmingCharacters(in: .whitespaces).isEmpty {
             HStack(spacing: 8) {
                 Button {
@@ -344,61 +294,6 @@ struct QuickAddSheet: View {
             .padding(.leading, 2)
             .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .leading)))
         }
-    }
-
-    // MARK: - Receipt fill
-
-    /// Plays a receipt's values into the sheet one after another — where it
-    /// came from, what it was, what it cost — so what the scan read is seen
-    /// landing in each field rather than found already sitting there.
-    private func fillFromReceipt() async {
-        guard let seed else { return }
-        // The sheet's own entrance first; anything sooner is hidden by it.
-        try? await Task.sleep(for: .milliseconds(420))
-
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) { filling = .title }
-        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-        try? await Task.sleep(for: .milliseconds(260))
-
-        // Typed in, a letter at a time, at a pace that reads as quick.
-        justFilled = .title
-        let letters = Array(seed.title)
-        let pause = max(14, min(40, 520 / max(1, letters.count)))
-        for index in letters.indices {
-            title = String(letters[...index])
-            if index % 3 == 0 { UISelectionFeedbackGenerator().selectionChanged() }
-            try? await Task.sleep(for: .milliseconds(pause))
-        }
-        try? await Task.sleep(for: .milliseconds(140))
-
-        // The total rolls up to its value.
-        withAnimation(.snappy) { filling = .amount; justFilled = .amount }
-        let steps = 16
-        for step in 1...steps {
-            let progress = Double(step) / Double(steps)
-            let eased = 1 - pow(1 - progress, 3)
-            let value = step == steps ? seed.amount : (seed.amount * eased).rounded()
-            withAnimation(.snappy(duration: 0.12)) {
-                amount = step == steps ? Money.plainAmount(value) : String(Int(value))
-            }
-            try? await Task.sleep(for: .milliseconds(34))
-        }
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        try? await Task.sleep(for: .milliseconds(360))
-
-        withAnimation(.smooth(duration: 0.35)) {
-            filling = nil
-            justFilled = nil
-        }
-    }
-
-    /// An accent outline on the field currently being filled.
-    private func fillHighlight(_ step: FillStep) -> some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .strokeBorder(AppTheme.accent.opacity(justFilled == step ? 0.55 : 0), lineWidth: 1.5)
-            .shadow(color: AppTheme.accent.opacity(justFilled == step ? 0.25 : 0), radius: 8)
-            .animation(.easeOut(duration: 0.3), value: justFilled)
-            .allowsHitTesting(false)
     }
 
     // MARK: - People
@@ -550,7 +445,7 @@ struct QuickAddSheet: View {
         case .participants: heads = max(1, participants.count)
         case .organiser, .individual, .custom: heads = 1
         }
-        return cost / Double(heads)
+        return Money.wholeShare(of: cost, heads: heads)
     }
 
     private func label(_ text: String, trailing: String? = nil) -> some View {
@@ -590,7 +485,7 @@ struct QuickAddSheet: View {
             vendor: seed?.vendor ?? "",
             // Category is inferred after the fact — see `commit`. Until then
             // the catch-all, which is what an unclassified thing on a trip is.
-            kind: seed?.kind ?? .activity,
+            kind: .activity,
             date: day,
             time: .at(parts.hour ?? 12, parts.minute ?? 0, on: day),
             cost: max(0, Double(amount) ?? 0),
@@ -624,7 +519,6 @@ struct QuickAddSheet: View {
         let item = compose()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         onSave(item)
-        let pages = seed?.receiptPages ?? []
         GlassToastCenter.shared.show(.init(
             symbol: "checkmark.circle.fill",
             tint: AppTheme.positive,
@@ -640,22 +534,11 @@ struct QuickAddSheet: View {
         // the second save corrects the row rather than adding another.
         Task { @MainActor in
             var classified = item
-            // A receipt's category came from the words printed on it, which
-            // beat a guess from the title alone.
-            var kind = seed?.kind ?? item.kind
-            if seed?.kind == nil { kind = await ActivityIconSuggester.kind(for: item.title) }
+            let kind = await ActivityIconSuggester.kind(for: item.title)
             classified.kind = kind
             classified.suggestedSymbol = await ActivityIconSuggester.symbol(for: item.title, kind: kind)
 
-            // The photo uploads after the expense is already saved: the row
-            // matters more than its picture, and a failed upload leaves it be.
-            if let photo = ReceiptImagePrep.combined(pages),
-               let data = photo.jpegForUpload(maxDimension: 2600, quality: 0.72) {
-                classified.receiptURL = try? await MediaStore.shared.uploadReceipt(data, for: item.id)
-            }
-
-            guard classified.kind != item.kind || classified.suggestedSymbol != item.suggestedSymbol
-                    || classified.receiptURL != item.receiptURL else { return }
+            guard classified.kind != item.kind || classified.suggestedSymbol != item.suggestedSymbol else { return }
             onSave(classified)
         }
     }

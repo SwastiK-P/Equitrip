@@ -59,6 +59,35 @@ struct ProfileRow: Codable {
 
 struct MembershipRow: Codable { let trip_id: UUID }
 
+/// Just a profile's id — for checking which rows already exist.
+struct ProfileIDRow: Decodable { let id: UUID }
+
+/// One person on a trip, seen from outside it, as `trip_people_by_code`
+/// returns them: a name and a face for the join preview, and no UPI ID.
+struct TripPreviewPersonRow: Decodable {
+    let profile_id: UUID
+    let role: String
+    let display_name: String
+    let avatar_asset: String
+    let avatar_url: String?
+
+    var profile: ProfileRow {
+        ProfileRow(
+            id: profile_id,
+            user_id: nil,
+            display_name: display_name,
+            avatar_asset: avatar_asset,
+            avatar_url: avatar_url
+        )
+    }
+}
+
+/// What `join_trip` answers: the trip, and whether this call put you on it.
+struct JoinTripRow: Decodable {
+    let trip: UUID
+    let joined: Bool
+}
+
 /// What `trip_preview` answers with: the two numbers the join screen states,
 /// and deliberately nothing that would amount to handing over the itinerary.
 struct TripPreviewRow: Decodable {
@@ -223,11 +252,9 @@ struct TripMemberRow: Codable {
     var trip_id: UUID
     var profile_id: UUID
     var role: String
-    /// "invited" or "active". Optional so this struct can still be *written*
-    /// without it — `upsertTrip` deliberately omits it, because a PostgREST
-    /// upsert only updates the columns it sends, and an organiser saving an
-    /// unrelated edit must not flip somebody's freshly accepted invitation
-    /// back to pending. Only `invite` and `respondToInvitation` set it.
+    /// "invited" or "active". Optional because it's decoded from rows written
+    /// without it — a new trip's starting roster takes the column's `active`
+    /// default. Only `invite` sets it on a write.
     var status: String?
     var invited_by: UUID?
     var invited_at: Date?
@@ -235,13 +262,12 @@ struct TripMemberRow: Codable {
     var isInvited: Bool { status == "invited" }
 }
 
-/// The write `upsertTrip` uses: identity and role only.
+/// A new trip's starting roster, as `createTrip` writes it: identity and role
+/// only, so `status` takes its `active` default.
 ///
-/// A separate type rather than an optional field, because the distinction is
-/// not "sometimes we don't know the status" — it's "this write must never
-/// touch the status column". Encoding a nil would send an explicit null and
-/// violate the not-null constraint; omitting the property is the only way to
-/// leave the column alone on conflict.
+/// A separate type rather than an optional field on `TripMemberRow`, because
+/// encoding a nil would send an explicit null and violate the not-null
+/// constraint; omitting the property is the only way to get the default.
 struct TripMemberWrite: Codable {
     var trip_id: UUID
     var profile_id: UUID
@@ -346,6 +372,8 @@ struct TripRow: Codable {
     var symbol: String
     var tint_hex: String
     var cover_url: String?
+    /// Optional so a row read before migration 0019 still decodes.
+    var title_style: String?
     var invite_code: String
     var created_by: UUID?
 
@@ -359,6 +387,7 @@ struct TripRow: Codable {
         symbol = trip.symbol
         tint_hex = "4B45C6"
         cover_url = trip.cover?.url.absoluteString
+        title_style = trip.titleStyle.rawValue
         invite_code = Trip.normaliseCode(trip.inviteCode)
         created_by = createdBy
     }
@@ -388,7 +417,8 @@ struct TripRow: Codable {
             organiserIDs: organiserIDs,
             cover: cover_url.flatMap(URL.init(string:)).map {
                 TripPhoto(url: $0, thumbURL: $0, photographer: "", photographerURL: nil, sourceName: "")
-            }
+            },
+            titleStyle: TripTitleStyle(stored: title_style)
         )
     }
 }

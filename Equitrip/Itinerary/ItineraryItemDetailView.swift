@@ -386,7 +386,8 @@ struct ItineraryItemDetailView: View {
     /// The collapsed form: one line, everybody's faces, one figure.
     @ViewBuilder
     private var evenShare: some View {
-        if let each = shares.first?.amount {
+        if !shares.isEmpty {
+            let each = Money.wholeShare(of: item.cost, heads: shares.count)
             HStack(spacing: 12) {
                 AvatarStack(travellers: shares.map(\.traveller), size: 28, max: 5)
 

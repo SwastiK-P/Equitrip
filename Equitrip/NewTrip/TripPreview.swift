@@ -154,7 +154,7 @@ struct TripPreview: View {
     private var title: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(trip.title)
-                .font(AppTheme.display(24))
+                .tripTitle(trip.titleStyle, size: 24)
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
