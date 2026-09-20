@@ -6,7 +6,14 @@
 
 Group travel, planned and paid for together.
 
-<sub>iOS 27 · watchOS 26.5 · Swift 5 · SwiftUI · FoundationModels · Supabase</sub>
+![Swift](https://img.shields.io/badge/Swift-5-F05138?style=flat-square&logo=swift&logoColor=white)
+![SwiftUI](https://img.shields.io/badge/SwiftUI-0B84FF?style=flat-square&logo=swift&logoColor=white)
+![iOS](https://img.shields.io/badge/iOS-1A1A1A?style=flat-square&logo=apple&logoColor=white)
+![watchOS](https://img.shields.io/badge/watchOS-1A1A1A?style=flat-square&logo=apple&logoColor=white)
+
+<br>
+
+<img src="docs/screenshots/hero.png" width="920" alt="">
 
 </div>
 
@@ -18,35 +25,8 @@ Receipts and payment emails are read on the device that took the photograph or
 holds the mailbox. When the trip ends, the balances collapse into the fewest
 transfers that clear them, and the group settles.
 
-It is a SwiftUI app for iPhone, with widgets, a watchOS companion, and Supabase as
-its only backend.
-
-<br>
-
-<div align="center">
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/home.png" width="230" alt=""></td>
-    <td align="center"><img src="docs/screenshots/trip.png" width="230" alt=""></td>
-    <td align="center"><img src="docs/screenshots/ledger.png" width="230" alt=""></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Where you stand, across every trip</sub></td>
-    <td align="center"><sub>The plan as a timeline, priced as it runs</sub></td>
-    <td align="center"><sub>Where the money went</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/settle.png" width="230" alt=""></td>
-    <td align="center"><img src="docs/screenshots/recap.png" width="230" alt=""></td>
-    <td align="center"><img src="docs/screenshots/equi.png" width="230" alt=""></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Minimised to the fewest transfers</sub></td>
-    <td align="center"><sub>A finished trip, told back</sub></td>
-    <td align="center"><sub>The assistant, on device</sub></td>
-  </tr>
-</table>
-</div>
+It is a SwiftUI app for iPhone and iPad, with widgets, a watchOS companion, and
+Supabase as its only backend.
 
 <br>
 
