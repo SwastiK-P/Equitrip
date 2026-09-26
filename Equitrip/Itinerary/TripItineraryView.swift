@@ -15,6 +15,7 @@ import SwiftUI
 struct TripItineraryView: View {
     @Environment(\.tripStore) private var store
     @Environment(\.notificationStore) private var notifications
+    @Environment(\.bookingChanges) private var bookingChanges
     @Environment(\.dismiss) private var dismiss
     @Environment(\.pane) private var pane
 
@@ -38,7 +39,6 @@ struct TripItineraryView: View {
     @State private var quickAdd: ItineraryItem?
     @State private var detailedAdd: ItineraryItem?
     @State private var showTravellers = false
-    @State private var showShare = false
     @State private var showChat = false
     /// Words to open the chat with, when Siri drafted them. See `AppNavigator`.
     @State private var chatDraft = ""
@@ -54,6 +54,7 @@ struct TripItineraryView: View {
     @State private var reviewingDeparture: TripDeparture?
     @State private var viewingStatement: TripDeparture?
     @State private var showRecap = false
+    @State private var showBookingChanges = false
 
     /// The trip's two faces. Not two destinations — the plan and its money are
     /// the same trip asked two different questions, and making the money a tab
@@ -99,6 +100,7 @@ struct TripItineraryView: View {
             if !(pane.isWide && trip != nil) { topBar }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showBookingChanges) { BookingChangesSheet(tripID: tripID) }
         .sheet(isPresented: $showTravellers) {
             if let trip {
                 TravellerPickerSheet(
@@ -156,9 +158,6 @@ struct TripItineraryView: View {
         .onChange(of: navigator.tripFocus?.id) { _, _ in takeFocus() }
         // What's on screen, for "this" — see `OnscreenEntities`.
         .onscreenTrip(trip)
-        .sheet(isPresented: $showShare) {
-            if let trip { TripInviteSheet(trip: trip) }
-        }
         .sheet(isPresented: $showEditor) {
             if let trip {
                 TripEditorSheet(
@@ -197,7 +196,7 @@ struct TripItineraryView: View {
                     // Presenting the editor while the detail sheet is still on
                     // screen makes SwiftUI juggle two `sheet(item:)` bindings
                     // at once, so the swap is sequenced explicitly.
-                    onEdit: trip.youAreOrganiser
+                    onEdit: trip.youCanEdit(item)
                         ? {
                             let target = item
                             viewingItem = nil
@@ -505,12 +504,6 @@ struct TripItineraryView: View {
                 }
                 .accessibilityLabel("Trip chat")
 
-                CircleGlyphButton(symbol: "person.badge.plus", size: 44) {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    showShare = true
-                }
-                .accessibilityLabel("Invite people")
-
                 if trip.youAreOrganiser {
                     CircleGlyphButton(symbol: "slider.horizontal.3", size: 44) {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -672,10 +665,10 @@ struct TripItineraryView: View {
         .overlay(alignment: .bottom) {
             TripCostBar(
                 trip: trip,
-                actionTitle: trip.youAreOrganiser ? "Add booking" : "Invite people",
-                actionSymbol: trip.youAreOrganiser ? "plus" : "person.badge.plus",
+                actionTitle: trip.youCanAddBookings ? "Add booking" : "Invite people",
+                actionSymbol: trip.youCanAddBookings ? "plus" : "person.badge.plus",
                 action: {
-                    if trip.youAreOrganiser { beginAdding() } else { showShare = true }
+                    if trip.youCanAddBookings { beginAdding() } else { showTravellers = true }
                 }
             )
             .padding(.horizontal, pane.gutter)
@@ -718,6 +711,19 @@ struct TripItineraryView: View {
     @ViewBuilder
     private func timeline(for trip: Trip, showsScope: Bool) -> some View {
         if showsScope { scopeFilter(for: trip) }
+
+        // Above the days it would change. A plan with a cancelled hotel still
+        // on it is a plan that's wrong, and this is the screen people read
+        // it on.
+        let changes = bookingChanges.waiting(for: trip.id)
+        if !changes.isEmpty {
+            // Same gutter as the scope chips above it; the day rows set their
+            // own, so this one has to say so.
+            BookingChangesInboxCard(waiting: changes, applied: []) { showBookingChanges = true }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 2)
+        }
 
         let days = visibleDays(of: trip)
 
@@ -1022,19 +1028,15 @@ struct TripItineraryView: View {
                 showChat = true
             }
 
-            clusterDivider
-
-            clusterButton(symbol: "person.badge.plus", label: "Invite people") {
-                showShare = true
-            }
-
-            if let trip, trip.youAreOrganiser {
+            if let trip, trip.youCanAddBookings {
                 clusterDivider
 
                 clusterButton(symbol: "plus", label: "Add booking") {
                     beginAdding()
                 }
+            }
 
+            if let trip, trip.youAreOrganiser {
                 clusterDivider
 
                 clusterButton(symbol: "slider.horizontal.3", label: "Edit trip") {
@@ -1044,9 +1046,10 @@ struct TripItineraryView: View {
         }
         .frame(height: 40)
         .glassEffect(.regular, in: .capsule)
-        // Animated so the two organiser-only controls slide out of the pill
+        // Animated so the member/organiser-only controls slide out of the pill
         // rather than the pill snapping to a new width.
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: trip?.youAreOrganiser)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: trip?.youCanAddBookings)
     }
 
     private func clusterButton(

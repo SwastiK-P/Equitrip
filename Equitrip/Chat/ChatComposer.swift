@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-/// A component the composer's tray can start.
+/// A component the composer's `+` menu can start.
 enum ChatComposeTool: String, CaseIterable, Identifiable {
     case photo, place, booking, poll, meetup, checklist, balances
 
@@ -23,29 +23,42 @@ enum ChatComposeTool: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Outline glyphs in one colour, the way Home's quick actions draw theirs.
-    /// A rainbow of filled tiles made the tray look like a launcher of seven
-    /// unrelated apps rather than seven things you can put in one message.
+    /// Filled glyphs, each in its own colour, so the menu can be scanned by
+    /// colour before it's read — the way a share sheet's app icons are.
     var symbol: String {
         switch self {
-        case .photo: "photo"
-        case .place: "mappin.and.ellipse"
-        case .booking: "ticket"
-        case .poll: "chart.bar"
+        case .photo: "photo.fill"
+        case .place: "mappin"
+        case .booking: "ticket.fill"
+        case .poll: "chart.bar.fill"
         case .meetup: "calendar"
         case .checklist: "checklist"
         case .balances: "arrow.left.arrow.right"
         }
     }
+
+    var tint: Color {
+        switch self {
+        case .photo: Palette.blue
+        case .place: Palette.glowRed
+        case .booking: Palette.indigo
+        case .poll: Palette.amberDeep
+        case .meetup: Palette.violet
+        case .checklist: Palette.teal
+        case .balances: Palette.greenDeep
+        }
+    }
 }
 
 /// The bottom of the thread: what you're answering or editing, who you might
-/// be @-naming, the tray of things you can send, and the field itself.
+/// be @-naming, the `+` for things you can send, and the field itself.
 ///
-/// The tray opens in place of the keyboard rather than as a sheet. A sheet
-/// that then opens a second sheet (the poll editor, the place search) is two
-/// dismissals to get back to the conversation; the tray is one tap.
+/// The `+` opens a menu over the thread (`ChatComposeMenu`) rather than a
+/// sheet. A sheet that then opens a second sheet (the poll editor, the place
+/// search) is two dismissals to get back to the conversation; the menu is one
+/// tap.
 struct ChatComposer: View {
+    @Environment(\.pane) private var pane
     @Binding var draft: String
     let context: (mode: ComposerContextBar.Mode, message: ChatMessage)?
     let contextAuthorName: String
@@ -56,7 +69,6 @@ struct ChatComposer: View {
     var onSend: () -> Void
     var onCancelContext: () -> Void
     var onTyping: () -> Void
-    var onTool: (ChatComposeTool) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -68,45 +80,73 @@ struct ChatComposer: View {
                     isMine: context.message.isMine,
                     onCancel: onCancelContext
                 )
+                // A glass card sitting just above the field, the same material
+                // as the field itself, rather than a frosted strip across the
+                // screen that reads as a toolbar.
+                .padding(.bottom, 7)
+                .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .readableWidth()
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             if !suggestions.isEmpty {
                 mentionStrip
+                    .readableWidth()
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             field
-
-            if trayOpen, context?.mode != .edit {
-                tray
-                    .transition(.offset(y: 24).combined(with: .opacity))
+        }
+        // Bare when it's only the field, so the glass floats over the thread
+        // (the thread's soft bottom edge effect does the fading) — glass on a
+        // frosted bar is glass on glass and just reads as grey. A reply
+        // preview or the mention strip gets the bar back so it doesn't sit
+        // on top of messages.
+        .background {
+            if hasChrome {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(alignment: .top) { Hairline() }
+                    .ignoresSafeArea(edges: .bottom)
+                    .transition(.opacity)
             }
         }
-        .background {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .overlay(alignment: .top) { Hairline() }
-                .ignoresSafeArea(edges: .bottom)
-        }
+        .animation(.snappy(duration: 0.26), value: hasChrome)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: suggestions.map(\.id))
+    }
+
+    /// Only the phone's mention strip still needs the frosted bar — its chips
+    /// would otherwise sit on top of messages. The reply preview carries its
+    /// own glass, and on iPad a band edge-to-edge under a centred column
+    /// reads as a stretched phone layout.
+    private var hasChrome: Bool {
+        !pane.isRegular && !suggestions.isEmpty
     }
 
     // MARK: Field
 
     private var field: some View {
+        GlassEffectContainer(spacing: 9) { fieldRow }
+    }
+
+    private var fieldRow: some View {
         HStack(alignment: .bottom, spacing: 9) {
             if context?.mode != .edit {
+                // Glass rather than a white disc, and it stays glass when the
+                // tray opens: the old solid-black ✕ was the heaviest thing on
+                // screen for a control that only means "put this away".
                 Button(action: toggleTray) {
                     Image(systemName: "plus")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(trayOpen ? AppTheme.card : AppTheme.ink)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AppTheme.ink)
                         .rotationEffect(.degrees(trayOpen ? 45 : 0))
-                        .frame(width: 38, height: 38)
-                        .background(trayOpen ? AnyShapeStyle(AppTheme.ink) : AnyShapeStyle(AppTheme.card), in: .circle)
-                        .overlay { Circle().strokeBorder(AppTheme.cardStroke.opacity(trayOpen ? 0 : 0.08)) }
+                        .frame(width: 40, height: 40)
+                        .contentShape(.circle)
                 }
-                .buttonStyle(PressableButtonStyle())
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
                 .accessibilityLabel(trayOpen ? "Close attachments" : "Send a photo, place, poll and more")
             }
 
@@ -119,10 +159,9 @@ struct ChatComposer: View {
                     if !new.isEmpty { onTyping() }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 9)
+                .padding(.vertical, 10)
                 .frame(minHeight: 40)
-                .background { Capsule().fill(AppTheme.card) }
-                .overlay { Capsule().strokeBorder(AppTheme.cardStroke.opacity(0.08)) }
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20, style: .continuous))
 
             if canSend {
                 Button(action: onSend) {
@@ -163,43 +202,11 @@ struct ChatComposer: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    // MARK: Tray
-
-    private var tray: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 16) {
-            ForEach(ChatComposeTool.allCases) { tool in
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    onTool(tool)
-                } label: {
-                    VStack(spacing: 7) {
-                        Image(systemName: tool.symbol)
-                            .font(.system(size: 19, weight: .medium))
-                            .foregroundStyle(AppTheme.accent)
-                            .frame(width: 52, height: 52)
-                            .background(AppTheme.card, in: .circle)
-                            .overlay { Circle().strokeBorder(AppTheme.cardStroke.opacity(0.07)) }
-
-                        Text(tool.title)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(AppTheme.inkSecondary)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(PressableButtonStyle())
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 6)
-        .padding(.bottom, 14)
-        .readableWidth()
-    }
+    // MARK: Menu
 
     /// Opens straight away, in the same transaction as the tap.
     ///
-    /// The tray used to hold a live `PhotosPicker`, which reaches for the
+    /// The old tray held a live `PhotosPicker`, which reaches for the
     /// photo library the moment it's built — so every open waited on that
     /// before anything moved, and the `+` turned a beat after the finger left
     /// it. The picker is presented from the thread now, only when asked for.

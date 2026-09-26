@@ -6,7 +6,7 @@
 
 ## Equitrip — iOS app
 
-226 files, 60k lines.
+251 files, 67k lines.
 
 **(root)**
 - `ContentView.swift` (0.1k) — ContentView
@@ -22,7 +22,8 @@
 - `ChatBubbleRow.swift` (0.3k) — ChatBubbleRow, ChatRowActions — One message, with everything you can do to it.
 - `ChatCards.swift` (0.5k) — ChatAttachmentCard, ChatCardFrame, ChatCardEyebrow, ChatPhotoCard, ChatPlaceCard, ChatMapSnapshot, +2
 - `ChatChecklistComposer.swift` (0.1k) — ChatChecklistComposer — Starting a bring-list: the things the group needs, before anyone has said they've got them.
-- `ChatComposer.swift` (0.3k) — ChatComposeTool, ChatComposer — The bottom of the thread: what you're answering or editing, who you might be @-naming, the tray of things you…
+- `ChatComposeMenu.swift` (0.1k) — ChatComposeMenu — The stack of glass pills that grows out of the composer's `+`.
+- `ChatComposer.swift` (0.3k) — ChatComposeTool, ChatComposer — The bottom of the thread: what you're answering or editing, who you might be @-naming, the `+` for things you…
 - `ChatDetailsSheet.swift` (0.2k) — ChatDetailsSheet — Everything worth finding again in a trip's thread: search, what's pinned, the photos, the places, and the ope…
 - `ChatMeetupComposer.swift` (0.1k) — ChatMeetupComposer — Proposing a time for the group to be somewhere — "lobby at 7".
 - `ChatMessage.swift` (0.1k) — ChatMessage, ChatResponse — One message in a trip's group chat: text, or text plus a component.
@@ -43,7 +44,7 @@
 - `Buttons.swift` (0.2k) — PressableButtonStyle, PrimaryButton, TextButton, CircleGlyphButton, NotificationBellButton, GlassCircleButton
 - `CodeSlotsField.swift` (0.1k) — CodeSlotsField — One box per character of an invite code.
 - `CurrencyPickerSheet.swift` (0.2k) — CurrencyPickerSheet, CurrencyOption, CurrencyRow — Picking the currency a trip is settled in.
-- `DateRangeCalendar.swift` (0.2k) — DateRangeCalendar — A scrolling calendar that picks both ends of a trip at once.
+- `DateRangeCalendar.swift` (0.3k) — DateRangeCalendar — A scrolling calendar that picks both ends of a trip at once.
 - `DateRangeSheet.swift` (0.1k) — DateRangeSheet, DateSpan — `DateRangeCalendar` as a sheet, for the screens that already exist and only need the dates corrected — the re…
 - `DestinationImage.swift` (0.1k) — DestinationImage — A photograph of a place, with a designed fallback.
 - `EquitripField.swift` (0.1k) — EquitripField, ShakeEffect — Labelled field with an animated focus ring, matching the card surfaces.
@@ -83,6 +84,16 @@
 - `TripLedger.swift` (0.9k) — TripLedger, DepartureLedgerRow, LedgerSearchField, LedgerFilterChip — The money side of one trip.
 
 **Gmail/**
+- `BookingChange.swift` (0.4k) — BookingChange, BookingRecord, BookingChangeStore — A booking an email says has moved or been cancelled, matched to the one on the plan it's about.
+- `BookingChangeApplier.swift` (0.2k) — BookingNotice, BookingDiffRow, BookingChangeApplier — Turns a `BookingChange` into an edit on the trip — and back.
+- `BookingChangeCard.swift` (0.8k) — BookingChangeCard — One booking change, told as the work the app is about to do for you.
+- `BookingChangeReader.swift` (0.3k) — BookingChangeReader — Reads one email, on this device, and decides whether it changes a booking on one of your trips — and which.
+- `BookingChangeReviewSheet.swift` (0.1k) — BookingChangeReviewSheet — The moment a booking change is found: it comes forward and asks.
+- `BookingChangeSync.swift` (0.2k) — BookingChangeSync — The loop for booking changes: cancellations, reschedules, amendments.
+- `BookingChangesInboxCard.swift` (0.1k) — BookingChangesInboxCard — Home's line into the booking-change queue.
+- `BookingChangesSheet.swift` (0.2k) — BookingChangesSheet — Booking changes read out of the mail, each waiting for a yes or a no.
+- `BookingMailFacts.swift` (0.6k) — BookingMailGate, BookingMailFacts, ScheduleValue, BookingText — What a booking email says, read by rule: which booking (flight numbers, a reference), what it was, what it is…
+- `BookingMatcher.swift` (0.3k) — BookingMatcher — Which booking an email is about — or an honest "can't tell".
 - `DetectedExpense.swift` (0.3k) — DetectedExpense, DetectedExpenseStore — A payment the app believes happened, read out of one email.
 - `DetectedExpensesCard.swift` (0.1k) — DetectedExpensesCard — Home's line into the detection queue.
 - `DetectedExpensesSheet.swift` (0.4k) — DetectedExpensesSheet — The payments the app found, waiting to be told what they were.
@@ -93,17 +104,17 @@
 - `GmailConfig.swift` (0.1k) — GmailConfig — Where the Gmail connection gets its identity.
 - `GmailExpenseSync.swift` (0.2k) — GmailExpenseSync — The loop: while a trip is running, read what arrived since last time.
 - `GmailMark.swift` (0.1k) — GmailMark — Gmail's envelope, drawn rather than bundled.
-- `GmailSettingsSheet.swift` (0.3k) — GmailSettingsSheet — Connecting the mailbox, and saying plainly what that means.
+- `GmailSettingsSheet.swift` (0.4k) — GmailSettingsSheet — Connecting the mailbox, and saying plainly what that means.
 - `MailMessage.swift` (0.2k) — MailMessage, GmailMessagePayload, MailText — One email, flattened to the four things any of this cares about: who it's from, what it says it's about, when…
 - `PayeeReader.swift` (0.1k) — PayeeReader — Who the money went to, pulled out of the email by shape.
 
 **Home/**
 - `AvatarPickerSheet.swift` (0.3k) — AvatarPickerSheet — Choosing the face you show up as.
 - `HomeCards.swift` (0.5k) — CurrentTripCard, NewTripCard, ProgressTrack, ItineraryRow, ActivityRow, PendingSettlementsCard, +1
-- `HomeView.swift` (0.8k) — HomeView — The "where do I stand?" screen.
+- `HomeView.swift` (0.9k) — HomeView — The "where do I stand?" screen.
 - `NotificationsSheet.swift` (0.3k) — NotificationsSheet — What the bell opens.
 - `ProfileSheet.swift` (0.7k) — ProfileSheet, SettingsSheetScaffold — What the top-right avatar opens.
-- `SiriSettingsSheet.swift` (0.1k) — SiriSettingsSheet — What you can say to Siri about your trips.
+- `SiriSettingsSheet.swift` (0.2k) — SiriSettingsSheet — What you can say to Siri about your trips, and what Siri shows back.
 
 **Intelligence/**
 - `ActivityIconSuggester.swift` (0.2k) — ActivityIconSuggester — Picks a fitting SF Symbol for a booking from its title.
@@ -124,29 +135,42 @@
 - `ChatMessageEntity.swift` (0.2k) — ChatMessageEntity, ChatMessageQuery, ChatComponentAttachment, ChatComponentAttachmentQuery, ChatMessageType, ChatMessageAttribute, +3 — One message in a trip's group chat, as Siri knows messages.
 - `ChatPersonEntity.swift` (0.1k) — ChatPersonEntity, ChatPersonQuery — A traveller, as the messages domain knows people — the author of a message and a member of a conversation.
 - `DraftChatMessageIntent.swift` (0.1k) — DraftChatMessageIntent — "Draft a message to the Rome group" — the words land in the chat's composer, unsent, with the thread open und…
-- `EditChatMessageIntent.swift` (0.1k) — EditChatMessageIntent — "Change that to eight o'clock" — the messages domain's *edit sent message*.
 - `IntentStores.swift` (0.1k) — IntentStores, IntentFailure — The store an intent acts through, or the reason Siri should give instead.
 - `LogExpenseIntent.swift` (0.2k) — LogExpenseIntent, ExpenseSplit — "Log ₹2,400 for dinner on the Goa trip" — an expense, by voice.
-- `MarkChatReadIntent.swift` (0.1k) — MarkChatReadIntent — "Mark the Goa chat as read" — the messages domain's *set read status*.
 - `OnscreenEntities.swift` (0.1k) — ext View
 - `OpenTripIntent.swift` (0.1k) — OpenTripIntent, OpenBookingIntent — "Open the Goa trip in Equitrip" — and what a trip picked from Spotlight or a Siri answer opens into.
+- `PaymentsWaitingIntent.swift` (0.1k) — PaymentsWaitingIntent — "Did anyone pay me?" — the payments people say they've made to you, with a card to confirm them on.
 - `RemoveBookingIntent.swift` (0.1k) — RemoveBookingIntent — "Cancel the cooking class on the Goa trip" — the calendar schema's *delete event*.
 - `SendChatMessageIntent.swift` (0.2k) — SendChatMessageIntent, ChatDestination, ChatDestinationResolver, ChatComposition — "Tell the Goa group I'm running ten minutes late" — the messages domain's *send message*, into a trip's group…
 - `SiriDonations.swift` (0.1k) — SiriDonations — Tells Siri what people do in the app, so it can learn the habits and offer the next one — "log an expense on…
-- `SiriSnippets.swift` (0.1k) — SiriBalanceSnippet, SiriUpNextSnippet, SiriExpenseSnippet
 - `TravellerAttendee.swift` (0.1k) — TravellerAttendee, AttendanceStatus, AttendeeKind — A person on a booking, in the calendar schema's terms.
 - `TravellerEntity.swift` (0.1k) — TravellerEntity, TravellerEntityQuery — A person on one of your trips, for the places Siri needs to ask "who?" — who paid, mostly.
 - `TripBalanceIntent.swift` (0.1k) — TripBalanceIntent — "Where do I stand on the Goa trip?" — answered out loud, without opening the app.
 - `TripConversationEntity.swift` (0.1k) — TripConversationEntity, TripConversationQuery, ConversationAttribute, OpenTripChatIntent — A trip's group chat, as Siri knows conversations.
+- `TripCountdownIntent.swift` (0.1k) — TripCountdownIntent — "How long until Goa?" — days to go, or how far into the trip you are, on the trip's own photograph.
 - `TripEntity.swift` (0.1k) — TripEntity, TripEntityQuery — A trip, as Siri, Spotlight and Shortcuts know it.
 - `TripMatcher.swift` (0.1k) — TripMatcher — Which trip, booking or person a few spoken words mean.
-- `UnsendChatMessageIntent.swift` (0.1k) — UnsendChatMessageIntent — "Unsend that" — the messages domain's *unsend message*.
 - `UpdateBookingIntent.swift` (0.1k) — UpdateBookingIntent — "Move the Rome train to 10" — the calendar schema's *update event*.
 - `WhatsNextIntent.swift` (0.1k) — WhatsNextIntent — "What's next on my trip?" — the next few bookings, read out.
+
+**Intents/Snippets/**
+- `BalanceSnippetIntent.swift` (0.3k) — BalanceSnippetIntent, BalanceSnippetModel, BalanceSnippetView — The card under "What do I owe?": where you stand, who pays whom, and the one thing you can do about it from h…
+- `EquiAnswerSnippetIntent.swift` (0.1k) — EquiAnswerSnippetIntent, EquiAnswerSnippetView — The card under an answer from Equi, when Equi picked one.
+- `ExpenseDraftSnippetIntent.swift` (0.3k) — ExpenseDraftSnippetIntent, ExpenseDraft, ExpenseDraftBook, SetDraftPayerIntent, SetDraftSplitIntent, ExpenseDraftModel, +1 — The confirmation card for a spoken expense, which can be corrected where it stands: tap who paid, tap how it'…
+- `ExpenseLoggedSnippetIntent.swift` (0.2k) — ExpenseLoggedSnippetIntent, UndoLoggedExpenseIntent, ExpenseLoggedModel, ExpenseLoggedSnippetView — The card after a spoken expense is saved: what went on the ledger, what it did to your balance on the trip, a…
+- `OpenFromSnippetIntent.swift` (0.1k) — OpenFromSnippetIntent, SnippetPlace — The "Open" and "Review" buttons on a Siri card: the app, brought forward on the thing the card was about.
+- `OpenInMapsIntent.swift` (0.1k) — OpenInMapsIntent — "Directions" on the what's-next card: the booking's place, in Maps.
+- `RespondToSettlementIntent.swift` (0.1k) — RespondToSettlementIntent, SettlementAnswers — "Confirm" on a Siri card: yes, that payment reached me.
+- `SettleRequestsSnippetIntent.swift` (0.2k) — SettleRequestsSnippetIntent, SettleRequestsModel, SettleRequestsSnippetView — The card of payments people say they've made to you, each confirmable with one tap — the watch's "Settle requ…
+- `SnippetArtwork.swift` (0.1k) — SnippetArtwork — The trip's colour and photograph, ready before a snippet is drawn.
+- `SnippetChrome.swift` (0.4k) — SnippetCard, SnippetLook, SnippetInk, SnippetTint, SnippetFigure, SnippetEyebrow, +8
+- `TripStatusSnippetIntent.swift` (0.2k) — TripStatusSnippetIntent, TripStatusModel, TripStatusSnippetView — The trip as a place and a date: its photograph across the whole card, how long until it starts or how far in…
+- `UpNextSnippetIntent.swift` (0.3k) — UpNextSnippetIntent, UpNextSnippetModel, UpNextSnippetView — The card under "What's next?": the next booking, large, in the app's dashed timeline block, with how to get t…
 
 **Itinerary/**
 - `FlightRouteMap.swift` (0.3k) — FlightRouteMap — The route, drawn on a map: two pins and the great-circle arc between them.
 - `FlightTicketCard.swift` (0.3k) — FlightTicketCard — A flight, drawn as the thing it is: a ticket.
+- `InviteQRCode.swift` (0.1k) — InviteQRCode — The invite's QR drawn module by module, with the app icon in the middle.
 - `ItineraryItemDetailView.swift` (0.9k) — ItineraryItemDetailView — One booking, in full.
 - `NoTripsAhead.swift` (0.3k) — NoTripsAhead — The Itinerary tab with nothing in front of it.
 - `PastTripsView.swift` (0.1k) — PastTripsView — Every trip that has ended, newest first, grouped by the year it ended.
@@ -188,14 +212,17 @@
 - `JoinTripFlow.swift` (0.4k) — JoinTripFlow — Joining someone else's trip.
 - `NewTripFlow.swift` (0.6k) — NewTripFlow — Creating a trip, both ways in.
 - `QuickAddSheet.swift` (0.5k) — QuickAddSheet — Logging something that just happened.
+- `StageActionBar.swift` (0.1k) — StageActionBar — The one button at the foot of every step of the creation flow.
+- `StepRail.swift` (0.1k) — StepRail — Where the creation flow is, drawn as the questions themselves rather than as a bar.
 - `TripCoverCard.swift` (0.2k) — TripCoverCard — The trip as an object you can touch: its photograph, its name and where it's going, in one card.
 - `TripDatesStage.swift` (0.1k) — TripDatesStage — Step two: when.
 - `TripImportStage.swift` (0.6k) — TripImportStage — Picks a PDF and watches the document being read.
 - `TripInvitationSheet.swift` (0.2k) — TripInvitationsCard, TripInvitationSheet — An invitation, opened.
-- `TripParticipantsStage.swift` (0.5k) — TripParticipantsStage — "Your document says four people.
+- `TripParticipantsStage.swift` (0.6k) — TripParticipantsStage — "Your document says four people.
 - `TripPlaceStage.swift` (0.4k) — TripPlaceStage — Step one of building a trip by hand: where.
 - `TripPreview.swift` (0.3k) — TripPreview — A trip you're not on yet, and the decision about whether to be.
 - `TripReviewStage.swift` (0.6k) — TripReviewStage — The last stop before a trip becomes the group's shared record.
+- `TripSpanTicket.swift` (0.2k) — TripSpanTicket — A trip's span drawn as a ticket: the day out on the left, the day home on the right, and how long that is acr…
 
 **Onboarding/**
 - `BookingsShowcase.swift` (0.3k) — BookingsShowcase — Onboarding's second page: booking PDFs read into the itinerary on device.
@@ -226,7 +253,7 @@
 **Root/**
 - `AppNavigator.swift` (0.1k) — AppNavigator — Where Siri, Spotlight or a Shortcut has asked the app to go.
 - `ControlRoutes.swift` (0.1k) — ControlRoutes — Hears a Control Centre / Lock Screen button press while the app is already running.
-- `EquitripShortcuts.swift` (0.1k) — EquitripShortcuts — The sentences Siri knows before anyone has set anything up.
+- `EquitripShortcuts.swift` (0.2k) — EquitripShortcuts — The sentences Siri knows before anyone has set anything up.
 - `ItineraryRoute.swift` (0.1k) — ItineraryRoute — A screen on the Itinerary tab's stack.
 - `RootTabView.swift` (0.4k) — AppTab, RootTabView — The tabs the product actually needs.
 

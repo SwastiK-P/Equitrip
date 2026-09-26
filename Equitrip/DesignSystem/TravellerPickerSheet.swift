@@ -42,6 +42,9 @@ struct TravellerPickerSheet: View {
     @State private var newEmail = ""
     @State private var isResolving = false
     @State private var addFailure: String?
+    /// The invite QR lives here, next to the roster it adds to, rather than
+    /// as its own button in the trip toolbar.
+    @State private var showInviteCode = false
     @FocusState private var addFocused: Bool
 
     private var canAdd: Bool {
@@ -57,6 +60,7 @@ struct TravellerPickerSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if isEditable { addField }
+                    if trip != nil { inviteCodeButton }
                     list
                     Color.clear.frame(height: 20)
                 }
@@ -68,6 +72,9 @@ struct TravellerPickerSheet: View {
         }
         .presentationDragIndicator(.hidden)
         .presentationBackground { CanvasBackground() }
+        .sheet(isPresented: $showInviteCode) {
+            if let trip { TripInviteSheet(trip: trip) }
+        }
     }
 
     private var header: some View {
@@ -146,6 +153,32 @@ struct TravellerPickerSheet: View {
                     .padding(.horizontal, 4)
             }
         }
+    }
+
+    private var inviteCodeButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showInviteCode = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "qrcode")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 18)
+                Text("Share invite QR code")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(AppTheme.ink)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.inkTertiary)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 52)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .panelSurface(corner: 16)
     }
 
     private var list: some View {

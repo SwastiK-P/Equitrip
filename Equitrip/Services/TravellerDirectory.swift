@@ -147,6 +147,8 @@ private struct DirectoryRow: Decodable {
     let id: UUID
     let display_name: String
     let avatar_asset: String
+    /// Optional so a project still on the pre-0021 functions decodes.
+    let avatar_url: String?
     let is_registered: Bool
 
     func match(email: String) -> TravellerDirectory.Match {
@@ -155,7 +157,8 @@ private struct DirectoryRow: Decodable {
             name: display_name,
             asset: Traveller.artwork(for: avatar_asset),
             email: email,
-            isRegistered: is_registered
+            isRegistered: is_registered,
+            avatarURL: avatar_url.flatMap(URL.init(string:))
         )
         return is_registered ? .registered(person) : .invited(person)
     }

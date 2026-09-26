@@ -31,7 +31,7 @@ struct WhatsNextIntent: AppIntent {
     init() {}
 
     @MainActor
-    func perform() async throws -> some ReturnsValue<[BookingEntity]> & ProvidesDialog & ShowsSnippetView {
+    func perform() async throws -> some ReturnsValue<[BookingEntity]> & ProvidesDialog & ShowsSnippetIntent {
         let store = try await IntentStores.store()
         guard !store.trips.isEmpty else { throw IntentFailure.noTrips }
 
@@ -45,17 +45,14 @@ struct WhatsNextIntent: AppIntent {
             throw $trip.needsValueError("Which trip?")
         }
 
-        let now = Date()
-        let ahead = target.items
-            .filter { ($0.time ?? $0.date.endOfDay) >= now }
-            .sorted(by: Trip.chronological)
-            .prefix(3)
+        let ahead = UpNextSnippetModel.upcoming(on: target)
+        let card = UpNextSnippetIntent(trip: TripEntity(target))
 
         guard let first = ahead.first else {
             return .result(
                 value: [],
                 dialog: "Nothing else is booked on \(target.title).",
-                view: SiriUpNextSnippet(tripTitle: target.title, rows: [])
+                snippetIntent: card
             )
         }
 
@@ -65,27 +62,28 @@ struct WhatsNextIntent: AppIntent {
         }
         spoken += "."
 
-        let rows = ahead.map { item in
-            SiriUpNextSnippet.Row(
-                id: item.id,
-                symbol: item.symbol,
-                title: item.title,
-                when: Self.when(item),
-                detail: Self.detail(item)
-            )
-        }
-
         return .result(
             value: ahead.map { BookingEntity($0, in: target) },
             dialog: IntentDialog(full: "\(spoken)", supporting: "Here's what's next on \(target.title)."),
-            view: SiriUpNextSnippet(tripTitle: target.title, rows: rows)
+            snippetIntent: card
         )
     }
 
-    /// "the flight to Rome at 7:40 tomorrow"
+    /// "the flight to Rome at 7:40 tomorrow, gate 14, delayed 20 minutes" —
+    /// the gate and the delay said out loud too, because with AirPods in
+    /// there is no card to read them off.
     @MainActor
     private static func phrase(for item: ItineraryItem) -> String {
-        "\(item.title) \(when(item).lowercasedFirst)"
+        var words = "\(item.title) \(when(item).lowercasedFirst)"
+        if let flight = item.flight {
+            if let gate = flight.departureGate { words += ", gate \(gate)" }
+            if flight.status == .delayed, let minutes = flight.departureDelay, minutes > 0 {
+                words += ", delayed \(minutes) minutes"
+            } else if flight.status == .cancelled {
+                words += ", cancelled"
+            }
+        }
+        return words
     }
 
     @MainActor
@@ -98,22 +96,6 @@ struct WhatsNextIntent: AppIntent {
 
         guard let time = item.time else { return dayWord.capitalizedFirst }
         return "At \(time.formatted(date: .omitted, time: .shortened)) \(dayWord)"
-    }
-
-    /// The line a traveller needs on the way: gate and terminal for a flight,
-    /// where it is for anything else.
-    @MainActor
-    private static func detail(_ item: ItineraryItem) -> String? {
-        if let flight = item.flight {
-            let parts = [
-                flight.number,
-                flight.departureTerminal.map { "Terminal \($0)" },
-                flight.departureGate.map { "Gate \($0)" },
-                flight.status.map(\.label)
-            ].compactMap { $0 }
-            return parts.joined(separator: " · ")
-        }
-        return item.vendorName
     }
 }
 

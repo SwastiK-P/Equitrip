@@ -30,10 +30,22 @@ enum GmailAPI {
     /// It is deliberately *loose* about what counts as a payment word and
     /// strict about the categories. A missed expense is a tap in quick add; a
     /// mailbox trawled in full is a battery complaint.
-    static let paymentQuery = """
+    nonisolated static let paymentQuery = """
         -category:promotions -category:social -category:forums -in:spam -in:trash \
         {"debited" "has been debited" "debited from" "paid to" "payment of" "you paid" \
         "transaction alert" "txn" "UPI" "spent on" "charged" "withdrawn" "purchase of"}
+        """
+
+    /// The search for booking changes — the same category exclusions, and a
+    /// message must say something was cancelled, moved or amended. Loose on
+    /// purpose, like `paymentQuery`: every confirmation that mentions "free
+    /// cancellation" comes through here, and `BookingMailGate` is what turns
+    /// those away, with its reason.
+    nonisolated static let bookingChangeQuery = """
+        -category:promotions -category:social -category:forums -in:spam -in:trash \
+        {"cancelled" "canceled" "cancellation" "rescheduled" "reschedule" "schedule change" \
+        "time change" "revised" "modified" "modification" "amended" "has been changed" "delayed" \
+        "preponed" "postponed" "booking updated"}
         """
 
     /// Message ids matching the payment query in a time window.
@@ -43,11 +55,12 @@ enum GmailAPI {
     /// is re-checked against the trip's real dates once the message is read.
     static func messageIDs(
         token: String,
+        query search: String = paymentQuery,
         after: Date,
         before: Date? = nil,
         limit: Int = 40
     ) async throws -> [String] {
-        var query = "\(paymentQuery) after:\(Int(after.timeIntervalSince1970))"
+        var query = "\(search) after:\(Int(after.timeIntervalSince1970))"
         if let before {
             query += " before:\(Int(before.timeIntervalSince1970) + 86_400)"
         }

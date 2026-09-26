@@ -37,8 +37,24 @@ enum SpotlightIndex {
         pending = Task {
             try? await Task.sleep(for: .seconds(1.5))
             guard !Task.isCancelled else { return }
+            teachTripNames(trips)
             try? await index(trips)
         }
+    }
+
+    /// The trip names Siri last learned, so it's told again only when they
+    /// change.
+    private static var taughtNames: Set<String>?
+
+    /// Siri's phrases that name a trip ("what's next on Goa") learn the names
+    /// from the trip entity query, but only when told the names changed.
+    /// That used to be a side effect of indexing — after the index write, so
+    /// an indexing error meant Siri never heard of "Goa" at all.
+    private static func teachTripNames(_ trips: [Trip]) {
+        let names = Set(trips.map { "\($0.title)|\($0.destination)" })
+        guard names != taughtNames else { return }
+        taughtNames = names
+        EquitripShortcuts.updateAppShortcutParameters()
     }
 
     /// The system asking for a rebuild — after a restore, or when its own
@@ -54,6 +70,7 @@ enum SpotlightIndex {
     static func clear() {
         pending?.cancel()
         sent = [:]
+        taughtNames = nil
         UserDefaults.standard.removeObject(forKey: knownKey)
         Task {
             try? await CSSearchableIndex.default().deleteAppEntities(ofType: TripEntity.self)
@@ -90,12 +107,6 @@ enum SpotlightIndex {
             let tripIDs = Array(removed)
             try? await index.deleteAppEntities(identifiedBy: tripIDs, ofType: TripEntity.self)
             try? await index.deleteAppEntities(identifiedBy: tripIDs, ofType: BookingEntity.self)
-        }
-
-        // Siri's phrases that name a trip ("what's next on Goa") learn the
-        // trip names from the entity queries — only when told they changed.
-        if !tripEntities.isEmpty || !removed.isEmpty {
-            EquitripShortcuts.updateAppShortcutParameters()
         }
 
         sent = fingerprints

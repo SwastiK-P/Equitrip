@@ -60,9 +60,16 @@ struct TripParticipantsStage: View {
     private var filled: Int { 1 + rows.filter { $0.traveller != nil }.count }
     private var everyoneAdded: Bool { filled >= expected }
     private var canAdd: Bool {
-        TravellerDirectory.isPlausible(entry)
-            && !rows.contains { $0.email == TravellerDirectory.normalise(entry) }
-            && TravellerDirectory.normalise(entry) != CurrentUser.traveller.email
+        TravellerDirectory.isPlausible(entry) && duplicateNote == nil
+    }
+
+    /// Why a valid address can't be added. Without it the Add button went grey
+    /// on exactly the addresses people were sure were right, and looked broken.
+    private var duplicateNote: String? {
+        let email = TravellerDirectory.normalise(entry)
+        if email == CurrentUser.traveller.email { return "That's you — you're already on this trip." }
+        if rows.contains(where: { $0.email == email }) { return "Already added." }
+        return nil
     }
 
     var body: some View {
@@ -128,16 +135,19 @@ struct TripParticipantsStage: View {
 
     // MARK: - Adding
 
+    /// The address and the button that adds it, as one control. The button
+    /// only turns solid once the text is something that could be an address,
+    /// so "is this ready" is answered before the tap rather than after it.
     private var addField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Image(systemName: "envelope")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(AppTheme.inkTertiary)
+            HStack(spacing: 11) {
+                Image(systemName: "at")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(entryFocused ? AppTheme.accent : AppTheme.inkTertiary)
                     .frame(width: 20)
 
-                TextField("their@email.com", text: $entry)
-                    .font(.system(size: 16))
+                TextField("friend@email.com", text: $entry)
+                    .font(.system(size: 16.5, weight: .medium))
                     .foregroundStyle(AppTheme.ink)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
@@ -149,22 +159,40 @@ struct TripParticipantsStage: View {
                     .onChange(of: entry) { lookupError = nil }
 
                 Button(action: add) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 21))
-                        .foregroundStyle(canAdd ? AppTheme.accent : AppTheme.inkTertiary.opacity(0.45))
+                    Text("Add")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(canAdd ? AppTheme.ctaLabel : AppTheme.inkTertiary)
+                        .padding(.horizontal, 16)
+                        .frame(height: 36)
+                        .background(
+                            canAdd ? AnyShapeStyle(AppTheme.accent) : AnyShapeStyle(AppTheme.cardStroke.opacity(0.06)),
+                            in: .capsule
+                        )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressableButtonStyle())
                 .disabled(!canAdd || isResolving)
+                .animation(.easeOut(duration: 0.18), value: canAdd)
                 .accessibilityLabel("Add this person")
             }
-            .padding(.horizontal, 14)
-            .frame(height: 54)
-            .panelSurface(corner: 16)
+            .padding(.leading, 16)
+            .padding(.trailing, 10)
+            .frame(height: 58)
+            .cardSurface(corner: 20, shadow: entryFocused ? 14 : 8)
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(AppTheme.accent.opacity(entryFocused ? 0.5 : 0), lineWidth: 1.5)
+            }
+            .animation(.easeOut(duration: 0.18), value: entryFocused)
 
             if let lookupError {
                 Label(lookupError, systemImage: "exclamationmark.circle")
                     .font(.system(size: 12.5))
                     .foregroundStyle(AppTheme.danger)
+                    .padding(.horizontal, 4)
+            } else if let duplicateNote {
+                Label(duplicateNote, systemImage: "checkmark.circle")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(AppTheme.inkSecondary)
                     .padding(.horizontal, 4)
             }
         }
@@ -193,8 +221,15 @@ struct TripParticipantsStage: View {
 
     // MARK: - Roster
 
+    /// Everyone on the trip so far, under a strip of their faces and the
+    /// count — the question this screen is asking, answered at a glance before
+    /// the list underneath is read.
     private var roster: some View {
         VStack(spacing: 0) {
+            crewHeader
+
+            Hairline()
+
             youRow
 
             ForEach(rows) { row in
@@ -207,7 +242,61 @@ struct TripParticipantsStage: View {
                 waitingRow(number: filled + offset + 1)
             }
         }
-        .cardSurface(corner: 20)
+        .cardSurface(corner: 22)
+    }
+
+    private var crewHeader: some View {
+        let people = [Traveller.you] + rows.compactMap(\.traveller)
+        let open = max(0, expected - filled)
+
+        return HStack(spacing: 14) {
+            HStack(spacing: -12) {
+                ForEach(people.prefix(5), id: \.id) { person in
+                    TravellerAvatar(traveller: person, size: 44)
+                        .transition(.scale.combined(with: .opacity))
+                }
+
+                // The seats the document counted and nobody fills yet — or,
+                // with no count to go on, one open seat that puts the cursor
+                // in the field.
+                ForEach(0..<min(max(open, 1), max(1, 6 - min(people.count, 5))), id: \.self) { _ in
+                    Button {
+                        entryFocused = true
+                    } label: {
+                        Circle()
+                            .fill(AppTheme.card)
+                            .overlay {
+                                Circle().strokeBorder(
+                                    AppTheme.cardStroke.opacity(0.22),
+                                    style: StrokeStyle(lineWidth: 1.5, dash: [4, 4])
+                                )
+                            }
+                            .overlay {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(AppTheme.inkTertiary)
+                            }
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("\(filled)")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.ink)
+                    .contentTransition(.numericText())
+                Text(filled == 1 ? "traveller" : "travellers")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(AppTheme.inkTertiary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .accessibilityElement(children: .combine)
     }
 
     private var youRow: some View {
@@ -227,9 +316,7 @@ struct TripParticipantsStage: View {
 
             Spacer(minLength: 0)
 
-            Text("You")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(AppTheme.inkTertiary)
+            statusPill("You", tint: AppTheme.accent)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -266,6 +353,10 @@ struct TripParticipantsStage: View {
 
             Spacer(minLength: 6)
 
+            if case .member = row.state {
+                statusPill("On Equitrip", tint: AppTheme.positive)
+            }
+
             if row.isInvited {
                 ShareLink(item: inviteMessage(for: row.email)) {
                     Image(systemName: "square.and.arrow.up")
@@ -292,6 +383,16 @@ struct TripParticipantsStage: View {
         .padding(.vertical, 10)
     }
 
+    private func statusPill(_ label: String, tint: Color) -> some View {
+        Text(label)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(tint.opacity(0.1), in: .capsule)
+            .fixedSize()
+    }
+
     private func primaryText(_ row: Row) -> String {
         switch row.state {
         case .member(let person), .invited(let person): person.name
@@ -303,7 +404,7 @@ struct TripParticipantsStage: View {
         switch row.state {
         case .resolving: "Looking them up…"
         case .member: row.email
-        case .invited: "Not on Equitrip yet — they'll be invited"
+        case .invited: "Invited — not on Equitrip yet"
         case .failed(let message): message
         }
     }
@@ -333,7 +434,7 @@ struct TripParticipantsStage: View {
                         .foregroundStyle(AppTheme.inkTertiary)
                 }
 
-            Text("Waiting for an email address")
+            Text("Still to add")
                 .font(.system(size: 14.5))
                 .foregroundStyle(AppTheme.inkTertiary)
 
@@ -345,7 +446,7 @@ struct TripParticipantsStage: View {
 
     private var note: some View {
         HStack(alignment: .top, spacing: 9) {
-            Image(systemName: "sparkles")
+            Image(systemName: "person.badge.shield.checkmark")
                 .font(.system(size: 12.5))
                 .foregroundStyle(AppTheme.inkTertiary)
                 .padding(.top, 1)
@@ -363,31 +464,12 @@ struct TripParticipantsStage: View {
     // MARK: - Continue
 
     private var continueBar: some View {
-        VStack(spacing: 8) {
-            if !everyoneAdded {
-                Text("\(filled) of \(expected) added")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(AppTheme.inkTertiary)
-                    .contentTransition(.numericText())
-            }
-
-            Button(action: commit) {
-                HStack(spacing: 7) {
-                    Text(everyoneAdded ? "Continue" : "Continue with \(filled.pluralised("person", "people"))")
-                        .font(.system(size: 16, weight: .semibold))
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 13, weight: .bold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-            }
-            .buttonStyle(.glassProminent)
-            .tint(AppTheme.accent)
-            .disabled(isResolving)
-        }
-        .animation(.easeOut(duration: 0.2), value: everyoneAdded)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
+        StageActionBar(
+            title: everyoneAdded ? "Continue" : "Continue with \(filled.pluralised("person", "people"))",
+            caption: everyoneAdded ? nil : "\(filled) of \(expected) added",
+            isEnabled: !isResolving,
+            action: commit
+        )
     }
 
     // MARK: - Work

@@ -67,7 +67,7 @@ struct LogExpenseIntent: AppIntent {
     }
 
     @MainActor
-    func perform() async throws -> some ReturnsValue<BookingEntity> & ProvidesDialog {
+    func perform() async throws -> some ReturnsValue<BookingEntity> & ProvidesDialog & ShowsSnippetIntent {
         // Everything that can send Siri back to ask a question happens first.
         // A value request restarts `perform()` from the top, and nothing may
         // have been written by then.
@@ -86,49 +86,51 @@ struct LogExpenseIntent: AppIntent {
             throw IntentFailure.notOnTrip(paidBy.name)
         }
 
-        let item = compose(title: trimmed, payer: paidBy, on: target)
+        // The card can change who paid and how it's split before anything is
+        // written, so what's confirmed is read back from the draft afterwards
+        // — not from the parameters Siri started with.
+        let draft = ExpenseDraft(tripID: target.id, title: trimmed, amount: amount, payerID: paidBy.id, split: split)
+        ExpenseDraftBook.shared.open(draft)
         let amountLabel = Money.format(amount, code: target.currencyCode)
-        let each = eachLabel(for: item, on: target)
 
         try await requestConfirmation(
             actionName: .log,
-            dialog: "Log \(amountLabel) for \(trimmed) on \(target.title)?"
-        ) {
-            SiriExpenseSnippet(
-                title: trimmed,
-                amount: amount,
-                currencyCode: target.currencyCode,
-                tripTitle: target.title,
-                payerName: paidBy.id == Traveller.you.id ? "You" : paidBy.name,
-                splitLabel: split == .everyone ? "Everyone (\(target.bearers(of: item).count))" : "Just \(paidBy.id == Traveller.you.id ? "you" : paidBy.name)",
-                eachLabel: each
-            )
-        }
+            dialog: IntentDialog(
+                full: "Log \(amountLabel) for \(trimmed) on \(target.title), \(Self.spokenTerms(of: draft, on: target))?",
+                supporting: "Log this on \(target.title)?"
+            ),
+            snippetIntent: ExpenseDraftSnippetIntent(draftID: draft.id)
+        )
 
         // Confirmed: the write, and nothing that can restart after it.
+        guard let confirmed = ExpenseDraftBook.shared.close(draft.id) else {
+            throw IntentFailure.notSaved("It was already logged.")
+        }
+        let trip = store.trip(target.id) ?? target
+        guard let finalPayer = trip.traveller(confirmed.payerID), !trip.invitedIDs.contains(finalPayer.id) else {
+            throw IntentFailure.notOnTrip(trip.traveller(confirmed.payerID)?.name ?? "They")
+        }
+        let item = confirmed.item(on: trip)
+
         store.clearWriteFailure()
-        store.addItem(item, to: target.id)
+        store.addItem(item, to: trip.id)
         if let failure = await store.settleWrites() {
             throw IntentFailure.notSaved(failure)
         }
 
-        // The category, as the quick-add sheet infers it: after the row exists,
-        // as a second save of the same id, so a slow guess never holds up the
-        // record and a failed one leaves it be.
-        var classified = item
-        classified.kind = await ActivityIconSuggester.kind(for: item.title)
-        classified.suggestedSymbol = await ActivityIconSuggester.symbol(for: item.title, kind: classified.kind)
-        if classified.kind != item.kind || classified.suggestedSymbol != item.suggestedSymbol {
-            store.addItem(classified, to: target.id)
-            _ = await store.settleWrites()
-        }
+        Self.classifyAfterwards(item, on: trip.id, in: store)
 
-        let saved = store.trip(target.id) ?? target
-        let dialog: IntentDialog = each.map {
-            "Logged \(amountLabel) for \(trimmed) on \(target.title). That's \($0) each."
-        } ?? "Logged \(amountLabel) for \(trimmed) on \(target.title)."
+        let saved = store.trip(trip.id) ?? trip
+        let heads = saved.bearers(of: item).count
+        let dialog: IntentDialog = heads > 1
+            ? "Logged \(amountLabel) for \(trimmed) on \(saved.title). That's \(Money.format(Money.wholeShare(of: item.cost, heads: heads), code: saved.currencyCode)) each."
+            : "Logged \(amountLabel) for \(trimmed) on \(saved.title)."
 
-        return .result(value: BookingEntity(classified, in: saved), dialog: dialog)
+        return .result(
+            value: BookingEntity(item, in: saved),
+            dialog: dialog,
+            snippetIntent: ExpenseLoggedSnippetIntent(tripID: saved.id, itemID: item.id)
+        )
     }
 
     // MARK: - Pieces
@@ -147,38 +149,31 @@ struct LogExpenseIntent: AppIntent {
         throw $trip.needsValueError("Which trip was it for?")
     }
 
-    /// The same booking the quick-add sheet would make from the same answers.
+    /// "paid by you, split 4 ways" — the terms said out loud, for when there's
+    /// no card to check them on.
     @MainActor
-    private func compose(title: String, payer: Traveller, on trip: Trip) -> ItineraryItem {
-        let now = Date()
-        let start = Calendar.current.startOfDay(for: trip.startDate)
-        let end = Calendar.current.startOfDay(for: trip.endDate)
-        let today = Calendar.current.startOfDay(for: now)
-        // Today when today is on the trip; otherwise the trip's first day, as
-        // Home's quick add files it.
-        let day = (start...end).contains(today) ? today : start
-        let parts = Calendar.current.dateComponents([.hour, .minute], from: now)
-
-        return ItineraryItem(
-            title: title,
-            kind: .activity,
-            date: day,
-            time: .at(parts.hour ?? 12, parts.minute ?? 0, on: day),
-            cost: amount,
-            split: split == .everyone ? .equal : .individual,
-            participantIDs: split == .everyone ? Set(trip.travellers.map(\.id)) : [payer.id],
-            paidByID: payer.id,
-            paymentMethod: AppSettings.defaultPaymentMethod,
-            createdByID: Traveller.you.id
-        )
+    private static func spokenTerms(of draft: ExpenseDraft, on trip: Trip) -> String {
+        let payer = draft.payerID == Traveller.you.id ? "you" : (trip.traveller(draft.payerID)?.name ?? "them")
+        let heads = trip.bearers(of: draft.item(on: trip)).count
+        return heads > 1 ? "paid by \(payer), split \(heads) ways" : "paid by \(payer), not split"
     }
 
-    /// "₹600" when the cost is shared, nil when one person carries it.
+    /// The category, as the quick-add sheet infers it: after the row exists,
+    /// as a second save of the same id, so a slow guess never holds up the
+    /// record — or, now, Siri's answer. It used to run before the reply, and a
+    /// model call on a cold launch was seconds of silence after "Log".
     @MainActor
-    private func eachLabel(for item: ItineraryItem, on trip: Trip) -> String? {
-        let heads = trip.bearers(of: item).count
-        guard heads > 1 else { return nil }
-        return Money.format(Money.wholeShare(of: amount, heads: heads), code: trip.currencyCode)
+    private static func classifyAfterwards(_ item: ItineraryItem, on tripID: UUID, in store: TripStore) {
+        Task {
+            var classified = item
+            classified.kind = await ActivityIconSuggester.kind(for: item.title)
+            classified.suggestedSymbol = await ActivityIconSuggester.symbol(for: item.title, kind: classified.kind)
+            guard classified.kind != item.kind || classified.suggestedSymbol != item.suggestedSymbol else { return }
+            // Undone from the card meanwhile: an upsert now would put it back.
+            guard store.trip(tripID)?.items.contains(where: { $0.id == item.id }) == true else { return }
+            store.addItem(classified, to: tripID)
+            _ = await store.settleWrites()
+        }
     }
 }
 

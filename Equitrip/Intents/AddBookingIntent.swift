@@ -35,7 +35,7 @@ struct AddBookingIntent {
     func perform() async throws -> some ReturnsValue<BookingEntity> & ProvidesDialog {
         let store = try await IntentStores.store()
         guard let trip = store.trip(calendar.id) else { throw IntentFailure.tripNotFound }
-        guard trip.youAreOrganiser else { throw IntentFailure.organiserOnly(trip.title) }
+        guard trip.youCanAddBookings else { throw IntentFailure.organiserOnly(trip.title) }
         guard recurrence == nil else { throw IntentFailure.noRepeats }
 
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)

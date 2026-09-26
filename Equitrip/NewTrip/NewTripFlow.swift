@@ -42,7 +42,13 @@ struct NewTripFlow: View {
         /// two questions, which is the whole point of importing one.
         case imported
 
-        var steps: Int { self == .manual ? 4 : 3 }
+        var steps: Int { rail.count }
+
+        var rail: [StepRail.Step] {
+            self == .manual
+                ? [.place, .dates, .people, .review]
+                : [.read, .people, .review]
+        }
     }
 
     enum Stage: Int, Hashable {
@@ -182,34 +188,34 @@ struct NewTripFlow: View {
 
     // MARK: - Header
 
+    /// Back on the left, where you are in the middle. The title used to sit
+    /// there with a progress bar under it; the rail says both at once, and
+    /// the question itself is the first thing on each screen anyway.
     private var header: some View {
-        VStack(spacing: 9) {
-            GlassEffectContainer(spacing: 16) {
-                HStack(spacing: 12) {
-                    CircleGlyphButton(
-                        symbol: trail.isEmpty ? "xmark" : "chevron.left",
-                        size: 40
-                    ) { back() }
-                    .accessibilityLabel(trail.isEmpty ? "Close" : "Back")
+        GlassEffectContainer(spacing: 16) {
+            HStack(spacing: 12) {
+                CircleGlyphButton(
+                    symbol: trail.isEmpty ? "xmark" : "chevron.left",
+                    size: 40
+                ) { back() }
+                .accessibilityLabel(trail.isEmpty ? "Close" : "Back")
 
-                    Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
+                if let step {
+                    StepRail(steps: route.rail, current: step)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                } else {
                     Text(stage.title)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(AppTheme.ink)
-                        .contentTransition(.opacity)
-
-                    Spacer(minLength: 0)
-
-                    // Balances the back button so the title stays optically centred.
-                    Color.clear.frame(width: 40, height: 40)
+                        .transition(.opacity)
                 }
-            }
 
-            if let step {
-                StepTrack(step: step, of: route.steps)
-                    .padding(.horizontal, 4)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                Spacer(minLength: 0)
+
+                // Balances the back button so the rail stays optically centred.
+                Color.clear.frame(width: 40, height: 40)
             }
         }
         .padding(.horizontal, usesWideSource ? pane.gutter : 20)
@@ -244,32 +250,6 @@ struct NewTripFlow: View {
                 dismiss()
             }
         }
-    }
-}
-
-// MARK: - Progress
-
-/// Three cells that fill as the flow advances.
-///
-/// Deliberately not a percentage bar: the steps aren't equal lengths and
-/// nobody is estimating time here. What it answers is "how much more of this
-/// is there", which a form with no visible end is bad at telling you.
-private struct StepTrack: View {
-    let step: Int
-    let of: Int
-
-    var body: some View {
-        HStack(spacing: 5) {
-            ForEach(1...of, id: \.self) { index in
-                Capsule()
-                    .fill(index <= step ? AppTheme.accent : AppTheme.cardStroke.opacity(0.12))
-                    .frame(height: 4)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .animation(.spring(response: 0.42, dampingFraction: 0.85), value: step)
-        .accessibilityElement()
-        .accessibilityLabel("Step \(step) of \(of)")
     }
 }
 

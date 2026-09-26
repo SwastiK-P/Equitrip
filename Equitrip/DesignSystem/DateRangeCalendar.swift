@@ -193,18 +193,40 @@ private struct MonthGrid: View {
         let inSpan = day >= span.lowerBound && day <= span.upperBound
         let isToday = calendar.isDate(day, inSameDayAs: today)
 
+        // The bar breaks at the edges of a week row and of the month, and each
+        // piece is rounded where it breaks. Squared off, a span starting on a
+        // Saturday ran a stub of bar out of its circle into the margin, and
+        // the next row started with a matching stub on the left.
+        let column = (calendar.component(.weekday, from: day) - calendar.firstWeekday + 7) % 7
+        let isFirstOfMonth = calendar.component(.day, from: day) == 1
+        let isLastOfMonth = calendar.date(byAdding: .day, value: 1, to: day)
+            .map { !calendar.isDate($0, equalTo: day, toGranularity: .month) } ?? true
+        let roundsLeading = isStart || column == 0 || isFirstOfMonth
+        let roundsTrailing = isEnd || column == 6 || isLastOfMonth
+        // An endpoint alone on its row is just the circle; a bar there would
+        // only peek out from behind it.
+        let showsBar = inSpan && span.lowerBound != span.upperBound
+            && !(isEndpoint && roundsLeading && roundsTrailing)
+
         return ZStack {
-            if inSpan, span.lowerBound != span.upperBound {
-                UnevenRoundedRectangle(
-                    cornerRadii: .init(
-                        topLeading: isStart ? 23 : 0,
-                        bottomLeading: isStart ? 23 : 0,
-                        bottomTrailing: isEnd ? 23 : 0,
-                        topTrailing: isEnd ? 23 : 0
-                    ),
-                    style: .continuous
-                )
-                .fill(AppTheme.accent.opacity(0.13))
+            if showsBar {
+                // On an endpoint the band starts at the circle's centre, so the
+                // circle is its rounded end. Spanning the whole cell, the band's
+                // own rounded cap poked out either side of the 40pt circle.
+                HStack(spacing: 0) {
+                    Color.clear.frame(maxWidth: isStart ? .infinity : 0)
+                    UnevenRoundedRectangle(
+                        cornerRadii: .init(
+                            topLeading: roundsLeading && !isStart ? 23 : 0,
+                            bottomLeading: roundsLeading && !isStart ? 23 : 0,
+                            bottomTrailing: roundsTrailing && !isEnd ? 23 : 0,
+                            topTrailing: roundsTrailing && !isEnd ? 23 : 0
+                        ),
+                        style: .continuous
+                    )
+                    .fill(AppTheme.accent.opacity(0.13))
+                    Color.clear.frame(maxWidth: isEnd ? .infinity : 0)
+                }
                 .padding(.vertical, 3)
             }
 

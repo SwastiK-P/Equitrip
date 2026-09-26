@@ -47,7 +47,7 @@ struct TravellerEntity: nonisolated Identifiable, nonisolated AppEntity {
 nonisolated struct TravellerEntityQuery: EntityStringQuery {
 
     func entities(for identifiers: [TravellerEntity.ID]) async throws -> [TravellerEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             let wanted = Set(identifiers)
             return Self.everyone(in: store.trips).filter { wanted.contains($0.id) }.map(TravellerEntity.init)
@@ -55,7 +55,7 @@ nonisolated struct TravellerEntityQuery: EntityStringQuery {
     }
 
     func entities(matching string: String) async throws -> [TravellerEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             let people = Self.everyone(in: TripMatcher.byRelevance(store.trips))
             let query = string.trimmingCharacters(in: .whitespaces)
@@ -68,7 +68,7 @@ nonisolated struct TravellerEntityQuery: EntityStringQuery {
 
     /// You first, then the people on the trip you're most likely talking about.
     func suggestedEntities() async throws -> [TravellerEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             Self.everyone(in: TripMatcher.byRelevance(store.trips)).prefix(12).map(TravellerEntity.init)
         }

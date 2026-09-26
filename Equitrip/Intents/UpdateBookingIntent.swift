@@ -39,7 +39,7 @@ struct UpdateBookingIntent {
               let before = trip.items.first(where: { $0.id == event.id })
         else { throw IntentFailure.bookingNotFound }
 
-        guard trip.youAreOrganiser else { throw IntentFailure.organiserOnly(trip.title) }
+        guard trip.youCanEdit(before) else { throw IntentFailure.organiserOnly(trip.title) }
         if let calendar, calendar.id != trip.id { throw IntentFailure.cannotMoveTrips }
         guard recurrence == nil else { throw IntentFailure.noRepeats }
 

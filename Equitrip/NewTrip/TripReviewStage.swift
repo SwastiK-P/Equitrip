@@ -247,16 +247,12 @@ struct TripReviewStage: View {
     /// booking's day is checked against the span, every figure below is
     /// printed in the currency — and neither was visible here before.
     private var essentials: some View {
-        VStack(spacing: 0) {
-            essentialRow(
-                symbol: "calendar",
-                label: spanLabel,
-                value: draft.dayCount.pluralised("day")
-            ) {
+        VStack(spacing: 12) {
+            // The same ticket the dates step drew, so the span is recognisably
+            // the one that was just chosen.
+            TripSpanTicket(start: draft.startDate, end: draft.endDate) {
                 showDates = true
             }
-
-            Hairline(inset: 16)
 
             essentialRow(
                 symbol: "banknote",
@@ -265,16 +261,8 @@ struct TripReviewStage: View {
             ) {
                 showCurrencyPicker = true
             }
+            .cardSurface(corner: 20)
         }
-        .cardSurface(corner: 20)
-    }
-
-    /// "Sun 20 Sep → Wed 23 Sep", or one date when the trip is a single day.
-    private var spanLabel: String {
-        let format = DateFormatter.cached("EEE d MMM")
-        let from = format.string(from: draft.startDate)
-        guard draft.dayCount > 1 else { return from }
-        return "\(from) → \(format.string(from: draft.endDate))"
     }
 
     private func essentialRow(
@@ -498,22 +486,12 @@ struct TripReviewStage: View {
     // MARK: - Create
 
     private var createBar: some View {
-        Button(action: onCreate) {
-            HStack(spacing: 7) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 13, weight: .bold))
-                Text("Create trip")
-                    .font(.system(size: 16, weight: .semibold))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-        }
-        .buttonStyle(.glassProminent)
-        .tint(AppTheme.accent)
-        .disabled(!draft.isValid)
-        .opacity(draft.isValid ? 1 : 0.5)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
+        StageActionBar(
+            title: "Create trip",
+            symbol: "checkmark",
+            isEnabled: draft.isValid,
+            action: onCreate
+        )
     }
 
     /// A booking outside the current dates widens the trip rather than being

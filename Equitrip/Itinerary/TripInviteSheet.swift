@@ -155,10 +155,6 @@ private struct InviteTicket: View {
     private let headHeight: CGFloat = 152
     private let corner: CGFloat = 28
 
-    private var qr: UIImage? {
-        QRCode.make(from: trip.inviteLink?.absoluteString ?? trip.inviteCode)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             head
@@ -252,47 +248,22 @@ private struct InviteTicket: View {
 
     /// The QR, as large as the card allows, on white.
     ///
-    /// White regardless of appearance, and never tinted: a scanner is looking
-    /// for maximum contrast between module and quiet zone, and every clever
-    /// thing you can do to a QR — a gradient, a logo, the app's own peach —
-    /// spends some of that contrast. The corner brackets sit outside the quiet
-    /// zone so they frame it without eating into it.
+    /// White regardless of appearance: a scanner is looking for contrast
+    /// between module and quiet zone, so the styling lives in the shape of
+    /// the modules and the logo is paid for with high error correction rather
+    /// than with contrast. The padding is the quiet zone.
     private var qrPanel: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.white)
-
-            if let qr {
-                Image(uiImage: qr)
-                    .interpolation(.none)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(18)
-                    .accessibilityLabel("QR code for join code \(trip.inviteCode)")
-            } else {
-                Image(systemName: "qrcode")
-                    .font(.system(size: 64, weight: .light))
-                    .foregroundStyle(.black.opacity(0.25))
+        InviteQRCode(payload: trip.inviteLink?.absoluteString ?? trip.inviteCode)
+            .padding(20)
+            .background(.white, in: .rect(cornerRadius: 26, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .strokeBorder(InviteQRCode.pupilInk.opacity(0.12), lineWidth: 1)
             }
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .frame(maxWidth: 268)
-        .overlay { brackets }
-        .shadow(color: AppTheme.softShadow(scheme), radius: 10, y: 5)
-    }
-
-    private var brackets: some View {
-        GeometryReader { proxy in
-            let length = min(proxy.size.width, proxy.size.height) * 0.16
-
-            ZStack {
-                ForEach(Corner.allCases, id: \.self) { position in
-                    BracketShape(corner: position, length: length, radius: 18)
-                        .stroke(trip.tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                }
-            }
-            .padding(9)
-        }
+            .frame(maxWidth: 268)
+            .shadow(color: AppTheme.softShadow(scheme), radius: 10, y: 5)
+            .accessibilityElement()
+            .accessibilityLabel("QR code for join code \(trip.inviteCode)")
     }
 
     private var codeBlock: some View {
@@ -436,11 +407,12 @@ enum QRCode {
     /// The scanner's burst animation is the only caller — the particles it
     /// throws are the actual modules of the code that was just scanned, which
     /// is the whole reason the effect reads as the code coming apart rather
-    /// than as confetti.
-    static func matrix(from string: String) -> [[Bool]] {
+    /// than as confetti. `correction` has to match the code being redrawn:
+    /// the invite card draws at "H" to carry its logo.
+    static func matrix(from string: String, correction: String = "M") -> [[Bool]] {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(string.utf8)
-        filter.correctionLevel = "M"
+        filter.correctionLevel = correction
 
         guard let output = filter.outputImage else { return [] }
         let side = Int(output.extent.width.rounded())

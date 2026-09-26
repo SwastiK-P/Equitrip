@@ -13,8 +13,8 @@ import SwiftUI
 /// arrives *with* the question and answers it in place. It is the same Equi:
 /// the same briefing (`EquiContext`), the same on-device model, the same
 /// structured answer — so a card the model picks is drawn under Siri's reply
-/// exactly as it would be in the thread, live off the store, and the model
-/// never gets to restate a figure it could get wrong.
+/// live off the store (`EquiAnswerSnippetIntent`), and the model never gets
+/// to restate a figure it could get wrong.
 ///
 /// Background by default. When the model can't run on this device there is no
 /// answer to give without the app, so it says why rather than opening a tab
@@ -42,7 +42,7 @@ struct AskEquiQuestionIntent: AppIntent {
     }
 
     @MainActor
-    func perform() async throws -> some ReturnsValue<String> & ProvidesDialog & ShowsSnippetView {
+    func perform() async throws -> some ReturnsValue<String> & ProvidesDialog & ShowsSnippetIntent {
         let asked = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !asked.isEmpty else { throw $question.needsValueError("What would you like to know?") }
 
@@ -65,20 +65,7 @@ struct AskEquiQuestionIntent: AppIntent {
         return .result(
             value: spoken,
             dialog: IntentDialog(full: "\(spoken)", supporting: "\(spoken)"),
-            view: EquiSiriAnswer(card: reply.card).environment(\.tripStore, store)
+            snippetIntent: EquiAnswerSnippetIntent(card: reply.card)
         )
-    }
-}
-
-/// The card under Siri's reply, when Equi picked one; nothing when the answer
-/// was only words.
-private struct EquiSiriAnswer: View {
-    let card: EquiCard?
-
-    var body: some View {
-        if let card {
-            EquiCardView(card: card)
-                .padding()
-        }
     }
 }

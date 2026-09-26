@@ -65,8 +65,7 @@ struct ProfileSheet: View {
     }
 
     private var handle: String {
-        guard let userName, userName.contains("@") else { return "Signed in" }
-        return userName
+        AuthService.shared.email ?? "Signed in"
     }
 
     var body: some View {

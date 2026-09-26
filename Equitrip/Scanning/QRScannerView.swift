@@ -253,8 +253,9 @@ struct QRScanScreen: View {
 
         // The particles are the code's own modules, re-encoded from what was
         // just read. A payload we somehow can't re-encode still has to hand
-        // over, so it gets the flash on a timer instead of a burst.
-        let modules = QRCode.matrix(from: payload)
+        // over, so it gets the flash on a timer instead of a burst. "H"
+        // because that's what the invite card (`InviteQRCode`) encodes at.
+        let modules = QRCode.matrix(from: payload, correction: "H")
         guard !modules.isEmpty else {
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             Task {

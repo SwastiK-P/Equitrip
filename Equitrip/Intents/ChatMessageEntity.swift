@@ -13,8 +13,8 @@ import LinkPresentation
 /// One message in a trip's group chat, as Siri knows messages.
 ///
 /// Built from the same `ChatMessage` the thread draws, read through
-/// `ChatArchive` so Siri can hold on to a message — to edit it, unsend it, or
-/// mark it read — without the chat being open. Photos and the app's own
+/// `ChatArchive` so Siri can hand back what it sent, and find a message by
+/// its words, without the chat being open. Photos and the app's own
 /// components (polls, meetups, checklists, bookings) travel as custom
 /// attachments with a description, not as files: the thread draws them live
 /// from the trip, and a snapshot handed to another app would go stale.
@@ -91,19 +91,19 @@ struct ChatMessageEntity: nonisolated Identifiable, nonisolated AppEntity {
 nonisolated struct ChatMessageQuery: EntityStringQuery {
 
     func entities(for identifiers: [ChatMessageEntity.ID]) async throws -> [ChatMessageEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return try await Self.entities(for: ChatArchive.messages(ids: identifiers), in: store)
     }
 
     /// Messages whose words match — "the message about the villa code".
     func entities(matching string: String) async throws -> [ChatMessageEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         let tripIDs = await MainActor.run { store.trips.map(\.id) }
         return try await Self.entities(for: ChatArchive.search(string, in: tripIDs), in: store)
     }
 
     func suggestedEntities() async throws -> [ChatMessageEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         let tripIDs = await MainActor.run { TripMatcher.byRelevance(store.trips).prefix(4).map(\.id) }
         return try await Self.entities(for: ChatArchive.recent(in: Array(tripIDs)), in: store)
     }
