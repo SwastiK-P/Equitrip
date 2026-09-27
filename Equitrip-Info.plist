@@ -47,6 +47,8 @@
 			<string>eh-kwee trip</string>
 		</dict>
 	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>com.swastik.Equitrip.viewTrip</string>

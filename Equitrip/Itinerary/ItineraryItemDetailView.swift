@@ -14,6 +14,7 @@ import SwiftUI
 /// put it there. Editing is one deliberate tap further, for those who can.
 struct ItineraryItemDetailView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tripStore) private var tripStore
 
     let item: ItineraryItem
     let trip: Trip
@@ -43,6 +44,18 @@ struct ItineraryItemDetailView: View {
     @State private var showDisputeEntry = false
     /// The dispute reason typed by the user.
     @State private var disputeReasonDraft = ""
+    /// A lookup made here for a flight whose number was only in its title.
+    @State private var trackedFlight: FlightDetails?
+
+    /// A fresh PNR/live read made on opening, shown over the saved one.
+    @State private var refreshedTrain: TrainDetails?
+    private var shownTrain: TrainDetails? { refreshedTrain ?? item.train }
+
+    /// The saved flight, or the one just looked up from the title.
+    private var shownFlight: FlightDetails? {
+        if let flight = item.flight, flight.isResolved { return flight }
+        return trackedFlight
+    }
 
     private var participants: [Traveller] { trip.participants(of: item) }
     private var shares: [(traveller: Traveller, amount: Double)] { trip.shares(of: item) }
@@ -62,7 +75,7 @@ struct ItineraryItemDetailView: View {
                 // and burying it under the cost breakdown meant scrolling past
                 // three cards of arithmetic to find out which airport you're
                 // leaving from.
-                if let flight = item.flight, flight.isResolved {
+                if let flight = shownFlight {
                     VStack(alignment: .leading, spacing: 10) {
                         sectionLabel("Flight details")
                         FlightTicketCard(flight: flight, fallbackDeparture: item.time)
@@ -70,7 +83,18 @@ struct ItineraryItemDetailView: View {
                     }
                 }
 
+                if let train = shownTrain, train.isResolved {
+                    VStack(alignment: .leading, spacing: 10) {
+                        sectionLabel("Train details")
+                        TrainTicketCard(train: train, fallbackDeparture: item.time)
+                    }
+                }
+
                 facts
+
+                // The weather it'll be in and what the twin makes of it —
+                // above the money, because it can still change the plan.
+                BookingWeatherSection(item: item, trip: trip)
 
                 if item.cost > 0 {
                     // Payer first, sharing second. The two answer "whose money
@@ -107,6 +131,8 @@ struct ItineraryItemDetailView: View {
         }
         .presentationDragIndicator(.hidden)
         .presentationBackground { CanvasBackground() }
+        .task(id: item.id) { await trackFlightFromTitle() }
+        .task(id: item.id) { await refreshTrain() }
         // "Who paid for this?" — see `OnscreenEntities`.
         .onscreenBooking(item)
         .sheet(isPresented: $showParticipants) {
@@ -822,6 +848,40 @@ struct ItineraryItemDetailView: View {
             .tracking(0.9)
             .foregroundStyle(AppTheme.inkTertiary)
             .padding(.leading, 2)
+    }
+
+    /// Re-reads the PNR on opening, while it can still change — waitlists clear
+    /// and charts are prepared in the last day, and a running train moves.
+    /// Organisers save the result so the timeline stays current for everyone.
+    private func refreshTrain() async {
+        guard let saved = item.train, saved.pnr.count == 10 else { return }
+        let reference = saved.journeyDate ?? item.date
+        guard reference.addingTimeInterval(3 * 86_400) > Date() else { return }
+        guard let fresh = try? await TrainLookupService.lookup(pnr: saved.pnr, previous: saved) else { return }
+
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { refreshedTrain = fresh }
+        if onEdit != nil {
+            var updated = item
+            updated.train = fresh
+            tripStore.updateItem(updated, in: trip.id)
+        }
+    }
+
+    /// Tracks a flight whose number is written in the booking but was never
+    /// looked up. Organisers keep the result so the timeline shows the ticket
+    /// too; for everyone else it's shown here only, since they can't edit.
+    private func trackFlightFromTitle() async {
+        guard item.flight?.isResolved != true,
+              let number = item.trackableFlightNumber,
+              let details = try? await FlightLookupService.shared.lookup(number: number, bookingDate: item.date)
+        else { return }
+
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { trackedFlight = details }
+        if onEdit != nil {
+            var updated = item
+            updated.flight = details
+            tripStore.updateItem(updated, in: trip.id)
+        }
     }
 }
 

@@ -241,6 +241,7 @@ struct SettleUpSheet: View {
                                 .tint(AppTheme.accent)
                                 .focused($amountFocused)
                         }
+                        .agentField("settleUp.amount", text: $amountText)
                     }
 
                     Text("You owe \(recipient?.name ?? "them") up to \(Money.format(suggestedAmount, code: trip.currencyCode))")
@@ -278,8 +279,7 @@ struct SettleUpSheet: View {
 
         return Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            method = option
-            if !option.isOnline { proofURL = nil }
+            choose(option)
         } label: {
             VStack(spacing: 6) {
                 Image(systemName: option.symbol)
@@ -306,6 +306,12 @@ struct SettleUpSheet: View {
             .contentShape(.rect(cornerRadius: 14))
         }
         .buttonStyle(.plain)
+        .agentTarget("settleUp.method.\(option.rawValue)") { choose(option) }
+    }
+
+    private func choose(_ option: PaymentMethod) {
+        method = option
+        if !option.isOnline { proofURL = nil }
     }
 
     // MARK: - UPI
@@ -604,6 +610,7 @@ struct SettleUpSheet: View {
             .frame(height: 46)
         }
         .buttonStyle(PressableButtonStyle())
+        .agentTarget("settleUp.submit") { submit() }
         .disabled(isSaving || !isValid)
         .opacity(isValid ? 1 : 0.5)
         .glassEffect(.regular.tint(AppTheme.accent).interactive(), in: .capsule)

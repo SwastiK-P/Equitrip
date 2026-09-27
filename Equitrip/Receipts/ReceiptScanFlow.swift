@@ -86,6 +86,7 @@ struct ReceiptScanFlow: View {
                 ItineraryItemEditor(
                     item: item,
                     travellers: trip.travellers,
+                    organiserIDs: trip.organiserIDs,
                     currencyCode: trip.currencyCode,
                     isNew: true,
                     onSave: { [receipt, onSave] saved in receipt.save(saved, through: onSave) }

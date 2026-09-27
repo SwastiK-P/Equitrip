@@ -440,6 +440,8 @@ struct ItemRow: Codable {
     /// kind of booking, so it rides as JSON rather than eleven mostly-null
     /// columns — see the note in `0001_init.sql`.
     var flight: FlightDetails?
+    /// The `train` jsonb column (`0023_train_tracking.sql`), same reasoning.
+    var train: TrainDetails?
     var paid_by: UUID?
     var payment_method: String?
     var receipt_url: String?
@@ -465,6 +467,7 @@ struct ItemRow: Codable {
         cover_url = item.cover?.url.absoluteString
         suggested_symbol = item.suggestedSymbol
         flight = item.flight
+        train = item.train
         paid_by = item.paidByID
         payment_method = item.paymentMethod?.rawValue
         receipt_url = item.receiptURL?.absoluteString
@@ -495,6 +498,7 @@ struct ItemRow: Codable {
             },
             suggestedSymbol: suggested_symbol,
             flight: flight,
+            train: train,
             paidByID: paid_by,
             paymentMethod: payment_method.flatMap(PaymentMethod.init(rawValue:)),
             receiptURL: receipt_url.flatMap(URL.init(string:)),

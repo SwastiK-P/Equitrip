@@ -1,0 +1,102 @@
+[
+  {
+    "sample_num": 1,
+    "instruction": "How many split modes does Equitrip have and what are they?",
+    "response": "Five: Split equally, Only participants, Exact amounts, Organiser pays, and One person."
+  },
+  {
+    "sample_num": 2,
+    "instruction": "What is the difference between Split equally and Only participants?",
+    "response": "Split equally divides the cost across everyone on the trip; Only participants divides it only across the people named on that booking."
+  },
+  {
+    "sample_num": 3,
+    "instruction": "In Exact amounts mode, what must be true of the amounts?",
+    "response": "They must add up to the booking's cost."
+  },
+  {
+    "sample_num": 4,
+    "instruction": "How is a 1000 rupee cost split equally across 3 people?",
+    "response": "In whole units: 333, 333 and 334. The leftover unit goes to one person so the shares add up to 1000."
+  },
+  {
+    "sample_num": 5,
+    "instruction": "Who can confirm a pending settlement?",
+    "response": "Only the recipient. The payer can only create or withdraw it."
+  },
+  {
+    "sample_num": 6,
+    "instruction": "Does a pending settlement change balances?",
+    "response": "No. It only affects balances after the recipient confirms it."
+  },
+  {
+    "sample_num": 7,
+    "instruction": "What does a negative balance mean?",
+    "response": "The traveller owes the group money."
+  },
+  {
+    "sample_num": 8,
+    "instruction": "What does a positive balance mean?",
+    "response": "The group owes that traveller money."
+  },
+  {
+    "sample_num": 9,
+    "instruction": "What is the maximum number of transfers needed to settle n people with balances?",
+    "response": "At most n minus 1 transfers."
+  },
+  {
+    "sample_num": 10,
+    "instruction": "How many transfers settle balances +8000, +4000, -3000, -4000, -5000?",
+    "response": "Three, because +4000 and -4000 cancel each other directly first."
+  },
+  {
+    "sample_num": 11,
+    "instruction": "What happens to an old booking stored with the room split mode?",
+    "response": "It is read as Only participants, the mode it actually behaved as."
+  },
+  {
+    "sample_num": 12,
+    "instruction": "Where does a trip's currency come from?",
+    "response": "Currency belongs to the trip, so each trip can use its own currency without conversion."
+  },
+  {
+    "sample_num": 13,
+    "instruction": "Can audit trail rows be edited?",
+    "response": "No. The audit trail is append-only; corrections are new rows."
+  },
+  {
+    "sample_num": 14,
+    "instruction": "How does Equitrip preview someone leaving a trip early?",
+    "response": "It builds a hypothetical trip without that person and asks it the same share and balance questions, with no separate arithmetic."
+  },
+  {
+    "sample_num": 15,
+    "instruction": "Can the on-device model invent an amount when importing a booking PDF?",
+    "response": "No. Amounts and times are copied from the source text; if an amount is missing the user enters it."
+  },
+  {
+    "sample_num": 16,
+    "instruction": "What happens to an expense added while offline?",
+    "response": "It goes into an ordered outbox and is replayed when the device reconnects."
+  },
+  {
+    "sample_num": 17,
+    "instruction": "What happens if the server refuses a queued offline write?",
+    "response": "The write is dropped and the failure is reported to the user."
+  },
+  {
+    "sample_num": 18,
+    "instruction": "Is a balance of 0.4 rupees shown as owed?",
+    "response": "No. A balance under one unit of the trip's currency counts as settled."
+  },
+  {
+    "sample_num": 19,
+    "instruction": "Who pays in Organiser pays mode when there are two organisers?",
+    "response": "The cost is divided between the two organisers."
+  },
+  {
+    "sample_num": 20,
+    "instruction": "What is the first pass of the settle-up algorithm?",
+    "response": "Cancel exact matches: a debtor whose balance mirrors a creditor's settles with one direct transfer."
+  }
+]

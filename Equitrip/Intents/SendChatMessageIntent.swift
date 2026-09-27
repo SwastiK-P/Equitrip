@@ -89,7 +89,8 @@ struct SendChatMessageIntent {
 
         // The message is out by now. A failed read of the thread's metadata
         // must not turn that into "didn't send" — a retry would post it twice.
-        let conversation = (try? await TripConversationQuery.conversations(for: [trip.id], in: store))?.first
+        // `conversations` can't fail: it drops the preview instead.
+        let conversation = await TripConversationQuery.conversations(for: [trip.id], in: store).first
             ?? TripConversationEntity(trip, thread: nil)
         return .result(value: sent.map { ChatMessageEntity($0, in: trip, conversation: conversation, lastReadAt: nil) })
     }

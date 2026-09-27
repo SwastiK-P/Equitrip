@@ -51,8 +51,22 @@ final class NotificationStore {
         // perfectly ordinary state here and the sheet says so itself, so
         // there's nothing an error banner would add that the bell doesn't
         // already communicate by staying quiet.
+        //
+        // Offline, the feed opens on the copy saved last time, so the bell
+        // doesn't go quiet on a plane.
+        let account = AuthService.shared.accountID
+        if items.isEmpty, let account,
+           let saved = OfflineCache.load([NotificationRow].self, .notifications, account: account) {
+            items = saved.map(\.asNotification).sorted { $0.date > $1.date }
+        }
+
         guard let remote = try? await SupabaseRepository.shared.loadNotifications() else { return }
         items = remote.sorted { $0.date > $1.date }
+
+        if let account {
+            let rows = remote.map { NotificationRow(notification: $0, profileID: Traveller.you.id) }
+            OfflineCache.save(rows, .notifications, account: account)
+        }
     }
 
     // MARK: - Read state
@@ -71,6 +85,15 @@ final class NotificationStore {
         Task { await SupabaseRepository.shared.markAllNotificationsRead() }
     }
 
+    /// Removes a notification for good. It's your own feed — RLS
+    /// (`notifications_own`) lets you delete only rows addressed to you, and
+    /// nothing else refers to them, so there's no history this could break.
+    func delete(_ id: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items.remove(at: index)
+        Task { await SupabaseRepository.shared.deleteNotification(id) }
+    }
+
     // MARK: - Posting
 
     /// Files a notification for everyone named, and shows it here immediately
@@ -80,11 +103,14 @@ final class NotificationStore {
             items.insert(notification, at: 0)
         }
 
-        Task {
-            for recipient in recipients {
-                await SupabaseRepository.shared.post(notification, to: recipient)
-            }
+        // Through the outbox, behind the change it's about. Posted directly,
+        // a notification about an expense logged offline was lost, and
+        // online it could reach the server before its expense did.
+        let outbox = OfflineOutbox.shared
+        for recipient in recipients {
+            outbox.enqueue(.notify(NotificationRow(notification: notification, profileID: recipient)))
         }
+        Task { await outbox.flush() }
     }
 
     /// Everyone on the trip hears about a new arrival.

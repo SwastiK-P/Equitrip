@@ -62,6 +62,30 @@ final class SupabaseRepository {
         currentName = nil
     }
 
+    /// Takes the profile from `OfflineCache` when the server can't be asked.
+    ///
+    /// Stored against the same owner check as a fetched one, so the offline
+    /// copy can only ever answer for the account it was saved under. Every
+    /// write the outbox replays later resolves through this.
+    func adoptCachedProfile(_ identity: OfflineCache.Identity, owner: UUID) {
+        profileID = identity.profileID
+        profileOwner = owner
+        currentName = identity.name
+        currentAvatar = identity.avatarAsset.map { ($0, identity.avatarURL) }
+    }
+
+    /// The resolved profile, in the shape `OfflineCache` keeps.
+    var cachedIdentity: OfflineCache.Identity? {
+        guard let currentProfileID else { return nil }
+        return OfflineCache.Identity(
+            profileID: currentProfileID,
+            name: currentName,
+            avatarAsset: currentAvatar?.asset,
+            avatarURL: currentAvatar?.url,
+            upiVPA: CurrentUser.traveller.upiVPA
+        )
+    }
+
     enum RepositoryError: LocalizedError {
         case notSignedIn
         case schemaMissing
@@ -751,20 +775,21 @@ final class SupabaseRepository {
         return rows.map(\.asAuditEvent)
     }
 
-    /// Files one entry.
+    /// Files one entry, for `OfflineOutbox`.
     ///
-    /// Non-throwing on purpose, and the only write in this file that is. An
-    /// audit entry is a side effect of an action that has already happened and
-    /// already reported its own success or failure; surfacing a second error
-    /// for the bookkeeping would tell somebody their edit failed when it
-    /// didn't. A row that doesn't land is simply absent from the trail, which
-    /// the next load makes visible by omission.
-    func recordAuditEvent(_ event: AuditEvent) async {
-        guard let profile = try? await resolveProfile() else { return }
-        _ = try? await client
-            .from("trip_audit_events")
-            .insert(AuditEventRow(event: event, actorProfileID: profile))
-            .execute()
+    /// Throws so the outbox can tell a row that couldn't be sent yet, which
+    /// it keeps, from one that was refused. A refused row is dropped without
+    /// a word: an audit entry is a side effect of an action that has already
+    /// reported its own success or failure, and a second error for the
+    /// bookkeeping would tell somebody their edit failed when it didn't.
+    ///
+    /// The actor is re-read here rather than trusted from the queued row: an
+    /// entry filed before the profile resolved carries a placeholder id,
+    /// which would fail the insert policy.
+    func insertAuditRow(_ row: AuditEventRow) async throws {
+        var row = row
+        row.actor_profile_id = try await resolveProfile()
+        try await client.from("trip_audit_events").insert(row).execute()
     }
 
     // MARK: - Notifications
@@ -791,29 +816,33 @@ final class SupabaseRepository {
     /// and they should hear about it from the server, not from whichever
     /// device happened to make the change.
     func post(_ notification: AppNotification, to profileID: UUID) async {
+        try? await deliver(NotificationRow(notification: notification, profileID: profileID))
+    }
+
+    /// Files one notification row: the throwing form of `post`, for
+    /// `OfflineOutbox`, which keeps a row that couldn't be sent and drops one
+    /// that was refused.
+    func deliver(_ row: NotificationRow) async throws {
         // Filing one for yourself is an ordinary insert; filing one for someone
         // else is not, and used to fail silently against `notifications_own`.
         // Every "you were added to a trip" the app thought it had sent was
         // rejected by RLS and swallowed by the `try?`. `notify_profile` is the
         // sanctioned way through: it checks you're both on the trip first.
-        if profileID == currentProfileID {
-            _ = try? await client
-                .from("notifications")
-                .insert(NotificationRow(notification: notification, profileID: profileID))
-                .execute()
+        if row.profile_id == currentProfileID {
+            try await client.from("notifications").insert(row).execute()
             return
         }
 
-        guard let tripID = notification.tripID else { return }
-        _ = try? await client.rpc(
+        guard let tripID = row.trip_id else { return }
+        try await client.rpc(
             "notify_profile",
             params: [
-                "p_profile": AnyJSON.string(profileID.uuidString),
+                "p_profile": AnyJSON.string(row.profile_id.uuidString),
                 "p_trip": .string(tripID.uuidString),
-                "p_kind": .string(notification.kind.rawValue),
-                "p_title": .string(notification.title),
-                "p_body": .string(notification.body),
-                "p_settlement": notification.settlementID.map { AnyJSON.string($0.uuidString) } ?? .null
+                "p_kind": .string(row.kind),
+                "p_title": .string(row.title),
+                "p_body": .string(row.body),
+                "p_settlement": row.settlement_id.map { AnyJSON.string($0.uuidString) } ?? .null
             ]
         ).execute()
     }
@@ -851,6 +880,14 @@ final class SupabaseRepository {
         _ = try? await client
             .from("notifications")
             .update(["is_read": true])
+            .eq("id", value: id)
+            .execute()
+    }
+
+    func deleteNotification(_ id: UUID) async {
+        _ = try? await client
+            .from("notifications")
+            .delete()
             .eq("id", value: id)
             .execute()
     }

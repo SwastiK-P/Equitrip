@@ -140,11 +140,13 @@ struct Trip: Identifiable {
         return .live
     }
 
-    /// Days elapsed for a live trip; how much of the plan is booked otherwise.
+    /// Days elapsed. The home card draws this as one cell per day, so an
+    /// upcoming trip is empty — measuring bookings here filled every cell
+    /// (22 bookings over 4 days capped at 1) before the trip had started.
     var progress: Double {
         switch phase {
         case .upcoming:
-            return items.isEmpty ? 0.04 : min(1, Double(items.count) / Double(max(dayCount * 2, 1)))
+            return 0
         case .live:
             let elapsed = Calendar.current.dateComponents(
                 [.day], from: Calendar.current.startOfDay(for: startDate), to: Date()
@@ -190,8 +192,16 @@ struct Trip: Identifiable {
     /// there's a payment in the ledger the useful figure is what the trip is
     /// going to cost you.
     var showsBalance: Bool {
-        phase != .upcoming && items.contains { $0.paidByID != nil }
+        phase != .upcoming && hasPayments
     }
+
+    /// Somebody has recorded paying for a booking, so somebody may owe them.
+    ///
+    /// The part of `showsBalance` settling needs. Flights and hotels are
+    /// usually paid for weeks ahead, and a group that wants to square up
+    /// before leaving shouldn't be told to wait for day one — so settling
+    /// ignores the phase that the headline figure cares about.
+    var hasPayments: Bool { items.contains { $0.paidByID != nil } }
 
     /// Who a booking's cost actually lands on, by its sharing rule.
     ///
@@ -448,6 +458,67 @@ struct Trip: Identifiable {
         let rhs = b.time ?? b.date
         if a.day != b.day { return a.day < b.day }
         return lhs < rhs
+    }
+}
+
+// MARK: - Offline copy
+
+/// Written by hand only because `tint` is a `Color`, which isn't Codable.
+///
+/// Nothing stores a tint that varies — `TripRow` writes one fixed hex — so
+/// it's rebuilt from that same hex rather than serialised. Only `OfflineCache`
+/// reads this: the server's rows stay the record, and this is the copy the
+/// app opens with when it can't reach them.
+extension Trip: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, destination, startDate, endDate, currencyCode, symbol
+        case travellers, items, settlements, departures, invitedIDs, organiserIDs
+        case cover, titleStyle, previewBookingCount, previewCost
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try values.decode(UUID.self, forKey: .id),
+            title: try values.decode(String.self, forKey: .title),
+            destination: try values.decode(String.self, forKey: .destination),
+            startDate: try values.decode(Date.self, forKey: .startDate),
+            endDate: try values.decode(Date.self, forKey: .endDate),
+            currencyCode: try values.decode(String.self, forKey: .currencyCode),
+            symbol: try values.decode(String.self, forKey: .symbol),
+            tint: Palette.tint(forHex: "4B45C6"),
+            travellers: try values.decode([Traveller].self, forKey: .travellers),
+            items: try values.decode([ItineraryItem].self, forKey: .items),
+            settlements: try values.decode([Settlement].self, forKey: .settlements),
+            departures: try values.decode([TripDeparture].self, forKey: .departures),
+            invitedIDs: try values.decode(Set<UUID>.self, forKey: .invitedIDs),
+            organiserIDs: try values.decode(Set<UUID>.self, forKey: .organiserIDs),
+            cover: try values.decodeIfPresent(TripPhoto.self, forKey: .cover),
+            titleStyle: try values.decode(TripTitleStyle.self, forKey: .titleStyle),
+            previewBookingCount: try values.decodeIfPresent(Int.self, forKey: .previewBookingCount),
+            previewCost: try values.decodeIfPresent(Double.self, forKey: .previewCost)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(title, forKey: .title)
+        try values.encode(destination, forKey: .destination)
+        try values.encode(startDate, forKey: .startDate)
+        try values.encode(endDate, forKey: .endDate)
+        try values.encode(currencyCode, forKey: .currencyCode)
+        try values.encode(symbol, forKey: .symbol)
+        try values.encode(travellers, forKey: .travellers)
+        try values.encode(items, forKey: .items)
+        try values.encode(settlements, forKey: .settlements)
+        try values.encode(departures, forKey: .departures)
+        try values.encode(invitedIDs, forKey: .invitedIDs)
+        try values.encode(organiserIDs, forKey: .organiserIDs)
+        try values.encodeIfPresent(cover, forKey: .cover)
+        try values.encode(titleStyle, forKey: .titleStyle)
+        try values.encodeIfPresent(previewBookingCount, forKey: .previewBookingCount)
+        try values.encodeIfPresent(previewCost, forKey: .previewCost)
     }
 }
 

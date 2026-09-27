@@ -92,26 +92,32 @@ nonisolated struct ChatMessageQuery: EntityStringQuery {
 
     func entities(for identifiers: [ChatMessageEntity.ID]) async throws -> [ChatMessageEntity] {
         let store = try await IntentStores.store(fresh: false)
-        return try await Self.entities(for: ChatArchive.messages(ids: identifiers), in: store)
+        let messages = try await IntentStores.fromServer(.chat) { try await ChatArchive.messages(ids: identifiers) }
+        return await Self.entities(for: messages, in: store)
     }
 
     /// Messages whose words match — "the message about the villa code".
     func entities(matching string: String) async throws -> [ChatMessageEntity] {
         let store = try await IntentStores.store(fresh: false)
         let tripIDs = await MainActor.run { store.trips.map(\.id) }
-        return try await Self.entities(for: ChatArchive.search(string, in: tripIDs), in: store)
+        let messages = try await IntentStores.fromServer(.chat) { try await ChatArchive.search(string, in: tripIDs) }
+        return await Self.entities(for: messages, in: store)
     }
 
     func suggestedEntities() async throws -> [ChatMessageEntity] {
         let store = try await IntentStores.store(fresh: false)
         let tripIDs = await MainActor.run { TripMatcher.byRelevance(store.trips).prefix(4).map(\.id) }
-        return try await Self.entities(for: ChatArchive.recent(in: Array(tripIDs)), in: store)
+        let messages = try await IntentStores.fromServer(.chat) { try await ChatArchive.recent(in: Array(tripIDs)) }
+        return await Self.entities(for: messages, in: store)
     }
 
+    /// Read positions are extra here, as previews are on a conversation: the
+    /// messages are what was asked for, so a failed read of them leaves each
+    /// message's read state unknown instead of failing the answer.
     @MainActor
-    static func entities(for messages: [ChatMessage], in store: TripStore) async throws -> [ChatMessageEntity] {
+    static func entities(for messages: [ChatMessage], in store: TripStore) async -> [ChatMessageEntity] {
         let tripIDs = Array(Set(messages.map(\.tripID)))
-        let threads = try await ChatArchive.threads(for: tripIDs)
+        let threads = (try? await ChatArchive.threads(for: tripIDs)) ?? [:]
         var conversations: [UUID: TripConversationEntity] = [:]
         for id in tripIDs {
             if let trip = store.trip(id) { conversations[id] = TripConversationEntity(trip, thread: threads[id]) }
@@ -150,7 +156,7 @@ struct ChatComponentAttachment: nonisolated Identifiable, nonisolated AppEntity 
 
 nonisolated struct ChatComponentAttachmentQuery: EntityQuery {
     func entities(for identifiers: [ChatComponentAttachment.ID]) async throws -> [ChatComponentAttachment] {
-        let messages = try await ChatArchive.messages(ids: identifiers)
+        let messages = try await IntentStores.fromServer(.chat) { try await ChatArchive.messages(ids: identifiers) }
         return await MainActor.run {
             messages.compactMap { message in
                 message.attachment.map { ChatComponentAttachment(messageID: message.id, attachment: $0) }

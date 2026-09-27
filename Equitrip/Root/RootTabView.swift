@@ -74,6 +74,8 @@ struct RootTabView: View {
     /// Here for the same reasons as the expense queue — and because an
     /// automatic reschedule edits the store, which lives here too.
     @State private var bookingChanges = BookingChangeStore()
+    /// The Weather Twin for every trip that's been looked at this session.
+    @State private var weatherTwin = WeatherTwinStore()
     @State private var bookingSync: BookingChangeSync?
     /// The change being put in front of the person, and the ones they've said
     /// "not now" to this session — those wait on Home instead of asking again.
@@ -81,6 +83,7 @@ struct RootTabView: View {
     @State private var snoozedChanges: Set<String> = []
     /// Requests from outside the view tree. See `consumeNavigation`.
     @State private var navigator = AppNavigator.shared
+    @State private var network = NetworkMonitor.shared
 
     var body: some View {
         TabView(selection: $selection) {
@@ -150,6 +153,12 @@ struct RootTabView: View {
         .tint(AppTheme.accent)
         // The tab bar shrinks out of the way as you read down a long ledger.
         .tabBarMinimizeBehavior(.onScrollDown)
+        // Offline and syncing, as a pill above the tab bar that tucks in
+        // beside it when the bar minimizes — see `OfflineBanner`. Off rather
+        // than empty the rest of the time, so the bar looks as it always has.
+        .tabViewBottomAccessory(isEnabled: OfflineBanner.phase != .hidden) {
+            OfflineBanner()
+        }
         // Equi announces itself on every visit — see `EquiAssistantView`'s
         // `playEntrance`. Counted here rather than watched from inside the tab
         // because a `TabView` may keep a tab's view alive after you leave it,
@@ -166,6 +175,7 @@ struct RootTabView: View {
         .environment(\.gmailSync, gmailSync)
         .environment(\.bookingChanges, bookingChanges)
         .environment(\.bookingChangeSync, bookingSync)
+        .environment(\.weatherTwin, weatherTwin)
         .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
             guard AppSettings.shakeToAddExpense else { return }
 
@@ -205,8 +215,12 @@ struct RootTabView: View {
         }
         .onChange(of: bookingChanges.waiting().map(\.id)) { _, _ in promptNextChange() }
         .sheet(item: $incomingSettlement) { settlement in
+            // Also outside the `.environment` modifiers: without the store
+            // handed over, the sheet answered on the empty default `TripStore`,
+            // found no such settlement and quietly did nothing.
             if let trip = store.trip(settlement.tripID) {
                 SettlementReviewSheet(trip: trip, settlement: settlement)
+                    .environment(\.tripStore, store)
             }
         }
         .task {
@@ -222,6 +236,10 @@ struct RootTabView: View {
             // the app is already on screen has nothing else to wake it.
             ControlRoutes.startListening()
             consumePendingControlRoute()
+            registerTabsForEqui()
+            // An Equi activity still up at launch belongs to a run that died
+            // with the process that was running it.
+            EquiAgentActivityController.endAll()
 
             store.notifier = notifications
             store.auditor = audit
@@ -278,6 +296,18 @@ struct RootTabView: View {
             consumePendingControlRoute()
             gmailSync?.sync(for: liveTrip)
             bookingSync?.sync()
+        }
+        .onChange(of: network.isOnline) { _, online in
+            // Everything that failed quietly while the phone was offline gets
+            // asked again. `sync` sends what the outbox is holding before it
+            // reads, so the list that comes back already includes it.
+            guard online else { return }
+            Task {
+                async let trips: Void = store.sync()
+                async let feed: Void = notifications.load()
+                async let realtime: Void = store.startSettlementRealtime()
+                _ = await (trips, feed, realtime)
+            }
         }
         .onChange(of: store.trips.count) { _, _ in
             gmailSync?.sync(for: liveTrip)
@@ -402,6 +432,24 @@ struct RootTabView: View {
            let settlement = store.trip(tripID)?.settlements.first(where: { $0.id == settlementID }),
            settlement.isPending, settlement.youAreRecipient {
             incomingSettlement = settlement
+        }
+    }
+
+    /// The tab bar's items, for Equi to press. They're UIKit's, so there's no
+    /// SwiftUI view to put a probe behind — see `EquiAgentTargets.tabBarItemFrame`.
+    private func registerTabsForEqui() {
+        let tabs: [(id: String, title: String, tab: AppTab)] = [
+            ("tab.home", "Home", .home),
+            ("tab.itinerary", "Itinerary", .itinerary),
+            ("tab.settle", "Settle", .settle),
+            ("tab.equi", "Equi", .equi)
+        ]
+        for (index, entry) in tabs.enumerated() {
+            EquiAgentTargets.shared.register(
+                entry.id,
+                locate: { EquiAgentTargets.tabBarItemFrame(title: entry.title, index: index, count: tabs.count) },
+                perform: { selection = entry.tab }
+            )
         }
     }
 

@@ -17,6 +17,12 @@ Pipeline (driven by `NewTrip/TripImportStage` then `NewTrip/TripReviewStage`):
    (`ExtractedOverview`, `ExtractedDayPlan`), 3 days at a time. `validate` lines each item up with its
    source row and takes amount and time from the text. A day that throws or validates empty falls back to
    `StructuredRowParser`; so does the whole document without Apple Intelligence (`usedFallback`).
+   **Nugen path (default):** `AppSettings.bookingReader` defaults to `BookingReader.nugenDefault`
+   (`model_01m3gncr4m0jbnqf`, also allow-listed as `BOOKING_MODEL` in the function). When it is a Nugen model,
+   days go to `NugenService.readDay` → Supabase function `nugen-reader` → the aligned model, through
+   the same `validate`; failures fall back to `StructuredRowParser` per day. No header model on this
+   path. `DAY_SYSTEM` in `supabase/functions/nugen-reader/index.ts` and `scripts/nugen/make_dataset.py`
+   must stay identical, and `dayPrompt` must keep the training format. Confidence < 60 → `unsureDays`.
 4. `ItineraryReasoner.refine` — deterministic tidy: reclassify, dedupe, order, drop non-bookings.
 5. Review: `ItineraryConsistency.check` (clock arithmetic: clashes, gaps, duplicates) and
    `ItineraryInspector.stream` (model: is this place in the trip's cities?) → `ItineraryIssue` →

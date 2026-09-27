@@ -16,6 +16,7 @@ struct TripItineraryView: View {
     @Environment(\.tripStore) private var store
     @Environment(\.notificationStore) private var notifications
     @Environment(\.bookingChanges) private var bookingChanges
+    @Environment(\.weatherTwin) private var weatherTwin
     @Environment(\.dismiss) private var dismiss
     @Environment(\.pane) private var pane
 
@@ -55,6 +56,7 @@ struct TripItineraryView: View {
     @State private var viewingStatement: TripDeparture?
     @State private var showRecap = false
     @State private var showBookingChanges = false
+    @State private var showTwin = false
 
     /// The trip's two faces. Not two destinations — the plan and its money are
     /// the same trip asked two different questions, and making the money a tab
@@ -148,6 +150,9 @@ struct TripItineraryView: View {
         .fullScreenCover(isPresented: $showRecap) {
             if let trip { TripRecapView(trip: trip) }
         }
+        .fullScreenCover(isPresented: $showTwin) {
+            WeatherTwinView(tripID: tripID)
+        }
         .fullScreenCover(isPresented: $showChat, onDismiss: { chatDraft = "" }) {
             if let trip { TripChatView(trip: trip, draft: chatDraft) }
         }
@@ -155,6 +160,11 @@ struct TripItineraryView: View {
         // for something on it: a booking, or the chat. Taken on arrival and on
         // every request after, since this screen may already be showing.
         .onAppear(perform: takeFocus)
+        // The twin reads the plan; bring it up to date whenever the plan is
+        // opened or edited, so the timeline's weather chips are current.
+        .task(id: trip.map { $0.items.count }) {
+            if let trip { await weatherTwin.refresh(trip) }
+        }
         .onChange(of: navigator.tripFocus?.id) { _, _ in takeFocus() }
         // What's on screen, for "this" — see `OnscreenEntities`.
         .onscreenTrip(trip)
@@ -233,6 +243,7 @@ struct TripItineraryView: View {
                 ItineraryItemEditor(
                     item: item,
                     travellers: trip.travellers,
+                    organiserIDs: trip.organiserIDs,
                     currencyCode: trip.currencyCode,
                     onSave: { store.updateItem($0, in: trip.id) },
                     onDelete: { store.removeItem(item.id, in: trip.id) }
@@ -243,6 +254,7 @@ struct TripItineraryView: View {
             if let trip {
                 QuickAddSheet(
                     travellers: trip.travellers,
+                    organiserIDs: trip.organiserIDs,
                     currencyCode: trip.currencyCode,
                     day: addDay(for: trip),
                     onSave: {
@@ -264,6 +276,7 @@ struct TripItineraryView: View {
                 ItineraryItemEditor(
                     item: seed,
                     travellers: trip.travellers,
+                    organiserIDs: trip.organiserIDs,
                     currencyCode: trip.currencyCode,
                     isNew: true,
                     onSave: { store.addItem($0, to: trip.id) }
@@ -498,6 +511,12 @@ struct TripItineraryView: View {
 
                 Spacer(minLength: 0)
 
+                CircleGlyphButton(symbol: "cloud.sun.bolt", size: 44) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showTwin = true
+                }
+                .accessibilityLabel("Weather twin")
+
                 CircleGlyphButton(symbol: "bubble.left.and.bubble.right", size: 44) {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     showChat = true
@@ -725,13 +744,22 @@ struct TripItineraryView: View {
                 .padding(.bottom, 2)
         }
 
+        // The weather over the plan, above the days it's about. Same gutter
+        // as the booking-changes card.
+        if !trip.items.isEmpty {
+            TwinEntryCard(trip: trip) { showTwin = true }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 2)
+        }
+
         let days = visibleDays(of: trip)
 
         if days.isEmpty {
             noBookings(for: trip)
         } else {
             ForEach(days) { day in
-                DayHeader(day: day, isCollapsed: collapsedDays.contains(day.id)) {
+                DayHeader(day: day, tripID: trip.id, isCollapsed: collapsedDays.contains(day.id)) {
                     withAnimation(.spring(response: 0.36, dampingFraction: 0.86)) {
                         if collapsedDays.contains(day.id) {
                             collapsedDays.remove(day.id)
@@ -1024,6 +1052,12 @@ struct TripItineraryView: View {
 
     private var actionCluster: some View {
         HStack(spacing: 0) {
+            clusterButton(symbol: "cloud.sun.bolt", label: "Weather twin") {
+                showTwin = true
+            }
+
+            clusterDivider
+
             clusterButton(symbol: "bubble.left.and.bubble.right", label: "Trip chat") {
                 showChat = true
             }

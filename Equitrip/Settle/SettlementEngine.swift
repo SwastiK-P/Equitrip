@@ -15,7 +15,7 @@ import SwiftUI
 /// agrees: `status` only ever leaves `.pending` by the recipient's own hand,
 /// never the payer's. That asymmetry is the whole feature. A balance nobody
 /// can move by typing a number into their own app is a balance worth trusting.
-struct Settlement: Identifiable, Hashable {
+struct Settlement: Identifiable, Hashable, Codable {
     enum Status: String, Codable, Hashable {
         case pending, confirmed, declined
 
@@ -243,9 +243,9 @@ extension Trip {
     var pendingSettlements: [Settlement] { settlements.filter { $0.status == .pending } }
 
     /// Nothing left to move, and there was something to begin with — the
-    /// distinction `showsBalance` already draws for the ledger applies here
-    /// too, for the same reason.
-    var isFullySettled: Bool { showsBalance && suggestedTransfers.isEmpty && pendingSettlements.isEmpty }
+    /// distinction `showsBalance` draws for the ledger applies here too, but
+    /// not its phase: an upcoming trip paid up in advance is genuinely square.
+    var isFullySettled: Bool { hasPayments && suggestedTransfers.isEmpty && pendingSettlements.isEmpty }
 
     /// A pending claim covering (all or part of) a given suggested transfer,
     /// if the same two people already have one in flight — so the Settle tab

@@ -73,7 +73,7 @@ struct SettleWidgetView: View {
 
                     Spacer(minLength: 8)
 
-                    AvatarStack(names: requests.map(\.fromName), size: 30)
+                    AvatarStack(names: requests.map(\.fromName), keys: requests.map { $0.fromID.map(SharedImages.faceKey) }, size: 30)
 
                     Text(first.amountLabel)
                         .font(.system(size: 26, weight: .bold, design: .rounded))
@@ -290,7 +290,7 @@ private struct SettleRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            InitialAvatar(name: request.fromName, size: 28)
+            InitialAvatar(name: request.fromName, size: 28, imageKey: request.fromID.map(SharedImages.faceKey))
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(request.fromName)
@@ -323,14 +323,16 @@ private struct SettleRow: View {
 /// Up to three overlapping faces, then a "+n" disc for the rest.
 private struct AvatarStack: View {
     let names: [String]
+    /// Faces in `SharedImages`, index for index with `names`.
+    var keys: [String?] = []
     var size: CGFloat = 28
 
     private static let visible = 3
 
     var body: some View {
         HStack(spacing: -size * 0.32) {
-            ForEach(Array(names.prefix(Self.visible).enumerated()), id: \.offset) { _, name in
-                InitialAvatar(name: name, size: size, ringed: true)
+            ForEach(Array(names.prefix(Self.visible).enumerated()), id: \.offset) { index, name in
+                InitialAvatar(name: name, size: size, imageKey: keys.indices.contains(index) ? keys[index] : nil, ringed: true)
             }
 
             if names.count > Self.visible {

@@ -38,11 +38,12 @@ struct SettleView: View {
     }
 
     /// Trips worth showing here: money has actually moved on them, or there's
-    /// a direct settlement in flight — the same bar `Trip.showsBalance` sets
-    /// for the ledger, plus settlements, since a trip can be fully paid up
+    /// a direct settlement in flight, since a trip can be fully paid up
     /// through direct transfers with nothing left in the booking ledger at all.
+    /// Upcoming trips count — bookings are paid for before anyone leaves, and
+    /// people settle before leaving too (`Trip.hasPayments`).
     private var relevantTrips: [Trip] {
-        store.trips.filter { $0.travellers.count > 1 && ($0.showsBalance || !$0.settlements.isEmpty) }
+        store.trips.filter { $0.travellers.count > 1 && ($0.hasPayments || !$0.settlements.isEmpty) }
     }
 
     /// Still something to square up — the "By trip" list.
@@ -88,6 +89,8 @@ struct SettleView: View {
         .sheet(isPresented: $showHistory) {
             SettleHistorySheet(trips: settledTrips)
         }
+        // See `EquiAgentTask.cleanup`.
+        .agentTarget("settle.sheet.close") { sheet = nil }
         .onAppear { withAnimation { appeared = true } }
     }
 
@@ -95,6 +98,7 @@ struct SettleView: View {
 
     /// The phone layout: one column, read top to bottom.
     private var stackedLayout: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: pane.spacing(24)) {
                 header
@@ -120,6 +124,8 @@ struct SettleView: View {
         }
         .scrollIndicators(.hidden)
         .refreshable { await store.sync() }
+        .agentScroller("settle.scroll") { proxy.scrollTo($0, anchor: .center) }
+        }
     }
 
     /// The iPad layout: where you stand, pinned beside what to do about it.
@@ -161,24 +167,29 @@ struct SettleView: View {
                             .staggered(3, appeared)
                     }
                     .padding(.bottom, 28)
+                    .shadowRoom(columnTopGap)
                 }
                 .scrollIndicators(.hidden)
-                .frame(width: pane.figureRailWidth)
+                .shadowRoomFrame(width: pane.figureRailWidth)
 
                 ScrollView {
                     plan
                         .staggered(3, appeared)
                         .padding(.bottom, 28)
+                        .shadowRoom(columnTopGap)
                 }
                 .scrollIndicators(.hidden)
                 .refreshable { await store.sync() }
-                .frame(width: pane.detailWidth(beside: pane.figureRailWidth))
+                .shadowRoomFrame(width: pane.detailWidth(beside: pane.figureRailWidth))
             }
             .gutter()
             .pageWidth()
-            .padding(.top, pane.spacing(24) - 6)
         }
     }
+
+    /// The gap under the header, moved inside the columns so the card
+    /// shadows at the top of each have somewhere to fall.
+    private var columnTopGap: CGFloat { pane.spacing(24) - 6 }
 
     @ViewBuilder
     private var failureBanner: some View {
@@ -356,6 +367,7 @@ struct SettleView: View {
                         onReview: { settlement in sheet = .review(settlement) },
                         onWithdraw: { settlement in store.withdrawSettlement(settlement, in: trip.id) }
                     )
+                    .id("settle-trip-\(trip.id)")
                 }
             }
         }
@@ -397,32 +409,62 @@ struct SettleView: View {
 
     // MARK: - Empty
 
+    /// Shown before anything's been paid on a shared trip. A lone tick and
+    /// a sentence read as "done", which is wrong this early — so the card says
+    /// you're square, then shows the three steps that will put something here.
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(AppTheme.positive)
-                .frame(width: 52, height: 52)
-                .background(AppTheme.positive.opacity(0.12), in: .circle)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(AppTheme.positive)
+                    .frame(width: 40, height: 40)
+                    .background(AppTheme.positive.opacity(0.12), in: .circle)
 
-            VStack(spacing: 5) {
-                Text("All square")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("All square")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(AppTheme.ink)
+                    Text("Nobody owes anybody yet")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(AppTheme.inkSecondary)
+                }
+            }
 
-                Text("When someone pays for a booking, who owes whom will show up here.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(AppTheme.inkSecondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(2)
-                    .frame(maxWidth: 260)
-                    .fixedSize(horizontal: false, vertical: true)
+            Rectangle()
+                .fill(AppTheme.cardStroke.opacity(0.08))
+                .frame(height: 1)
+
+            VStack(alignment: .leading, spacing: 12) {
+                emptyStep(1, symbol: "airplane", "Add a booking to a shared trip")
+                emptyStep(2, symbol: "creditcard", "Mark who paid for it")
+                emptyStep(3, symbol: "arrow.left.arrow.right", "Who owes whom shows up here")
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
-        .padding(.horizontal, 24)
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface(corner: 24)
+    }
+
+    private func emptyStep(_ number: Int, symbol: String, _ text: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(AppTheme.inkSecondary)
+                .frame(width: 28, height: 28)
+                .background(AppTheme.inkTertiary.opacity(0.12), in: .circle)
+
+            Text(text)
+                .font(.system(size: 13.5, weight: .medium))
+                .foregroundStyle(AppTheme.ink)
+
+            Spacer(minLength: 0)
+
+            Text("\(number)")
+                .font(.system(size: 11.5, weight: .bold, design: .rounded))
+                .foregroundStyle(AppTheme.inkTertiary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -645,6 +687,7 @@ private struct TransferRow: View {
                     .background(AppTheme.cta, in: .capsule)
             }
             .buttonStyle(PressableButtonStyle())
+            .agentTarget("settle.pay.\(trip.id).\(transfer.to)", perform: onSettle)
         } else if youAreRecipient {
             TagChip(title: "Owed to you", tint: AppTheme.moneyIn, symbol: "arrow.down.left")
         }
@@ -654,4 +697,22 @@ private struct TransferRow: View {
 #Preview {
     SettleView()
         .environment(\.tripStore, TripStore())
+}
+
+/// Room for card shadows inside an iPad column's `ScrollView`.
+///
+/// Each column scrolls on its own, and a scroll view clips to its frame, so
+/// cards flush with its edges had their shadows sliced into hard rectangles.
+/// The content is inset by the shadow's reach and the scroll view widened by
+/// the same amount, so the cards stay put and the shadow is drawn in full.
+private let shadowReach: CGFloat = 24
+
+private extension View {
+    func shadowRoom(_ top: CGFloat) -> some View {
+        padding(.horizontal, shadowReach).padding(.top, top)
+    }
+
+    func shadowRoomFrame(width: CGFloat) -> some View {
+        frame(width: width + shadowReach * 2).padding(.horizontal, -shadowReach)
+    }
 }

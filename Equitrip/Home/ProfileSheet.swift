@@ -34,6 +34,7 @@ struct ProfileSheet: View {
     @State private var showNotificationSettings = false
     @State private var showGmailSettings = false
     @State private var showSiri = false
+    @State private var showBookingReader = false
     /// Observed so the row's value line follows a connection made inside the
     /// sub-sheet without the profile screen being re-presented.
     @State private var gmail = GmailAccount.shared
@@ -48,6 +49,7 @@ struct ProfileSheet: View {
     /// Bumped whenever a notification channel is toggled, for the same reason.
     @State private var channelVersion = 0
     @State private var shakeToAdd = AppSettings.shakeToAddExpense
+    @State private var bookingReader = AppSettings.bookingReader
     /// Whether the "hint reset" confirmation is showing — see
     /// `resetShakeHint`. Not persisted; it only ever needs to be on screen
     /// for the couple of seconds after the long press that triggered it.
@@ -106,9 +108,13 @@ struct ProfileSheet: View {
         .sheet(isPresented: $showSiri) {
             SiriSettingsSheet()
         }
+        .sheet(isPresented: $showBookingReader) {
+            BookingReaderSettingsSheet(selection: $bookingReader)
+        }
         .onChange(of: currency) { _, new in AppSettings.defaultCurrency = new }
         .onChange(of: method) { _, new in AppSettings.defaultPaymentMethod = new }
         .onChange(of: shakeToAdd) { _, new in AppSettings.shakeToAddExpense = new }
+        .onChange(of: bookingReader) { _, new in AppSettings.bookingReader = new }
         .onChange(of: upiID) { _, new in
             AppSettings.upiID = new
             Task { try? await SupabaseRepository.shared.updateUPIID(new) }
@@ -260,6 +266,12 @@ struct ProfileSheet: View {
                 gmailRow
                 Hairline(inset: 16)
                 settingsRow(symbol: "waveform", title: "Siri", value: "What to say") { showSiri = true }
+                Hairline(inset: 16)
+                settingsRow(
+                    symbol: "doc.text.viewfinder",
+                    title: "Booking reader",
+                    value: bookingReader.label
+                ) { showBookingReader = true }
             }
             .cardSurface(corner: 22)
         }

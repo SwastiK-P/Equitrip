@@ -119,6 +119,7 @@ struct TripReviewStage: View {
             ItineraryItemEditor(
                 item: item,
                 travellers: draft.travellers,
+                organiserIDs: draft.makeTrip().organiserIDs,
                 currencyCode: draft.currencyCode,
                 onSave: { updated in
                     if let index = draft.items.firstIndex(where: { $0.id == updated.id }) {
@@ -138,6 +139,7 @@ struct TripReviewStage: View {
                     participantIDs: Set(draft.travellers.map(\.id))
                 ),
                 travellers: draft.travellers,
+                organiserIDs: draft.makeTrip().organiserIDs,
                 currencyCode: draft.currencyCode,
                 isNew: true,
                 onSave: { new in
@@ -319,30 +321,52 @@ struct TripReviewStage: View {
     /// pattern-matching path doesn't have.
     private var importNote: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: draft.usedFallbackParser ? "exclamationmark.circle.fill" : "apple.intelligence")
+            Image(systemName: importNoteSymbol)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(draft.usedFallbackParser ? Palette.amber : AppTheme.accent)
                 .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(draft.usedFallbackParser ? "Read by pattern matching" : "Powered by Apple Intelligence")
+                Text(importNoteTitle)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AppTheme.ink)
 
-                Text(
-                    draft.usedFallbackParser
-                        ? "Apple Intelligence wasn't available, so this is a rough pass. Check the times and amounts carefully."
-                        : "Apple Intelligence pulled these out of \(draft.sourceFileName ?? "your document"). Worth a quick check before the group sees it."
-                )
-                .font(.system(size: 12.5))
-                .foregroundStyle(AppTheme.inkSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(importNoteDetail)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(AppTheme.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
         }
         .padding(14)
         .panelSurface(corner: 18)
+    }
+
+    private var importNoteSymbol: String {
+        if draft.usedFallbackParser { return "exclamationmark.circle.fill" }
+        return draft.nugenModel == nil ? "apple.intelligence" : "cpu"
+    }
+
+    private var importNoteTitle: String {
+        if draft.usedFallbackParser { return "Read by pattern matching" }
+        return draft.nugenModel.map { "Read by \($0) on Nugen" } ?? "Powered by Apple Intelligence"
+    }
+
+    private var importNoteDetail: String {
+        let source = draft.sourceFileName ?? "your document"
+        if draft.usedFallbackParser {
+            let missing = AppSettings.bookingReader.nugenModelID != nil
+                ? "Nugen couldn't be reached" : "Apple Intelligence wasn't available"
+            return "\(missing), so this is a rough pass. Check the times and amounts carefully."
+        }
+        guard draft.nugenModel != nil else {
+            return "Apple Intelligence pulled these out of \(source). Worth a quick check before the group sees it."
+        }
+        let base = "Your Nugen-aligned model named these from \(source); every time and amount was copied from the document itself."
+        guard !draft.unsureDays.isEmpty else { return base + " Worth a quick check before the group sees it." }
+        let days = ListFormatter.localizedString(byJoining: draft.unsureDays.map { "day \($0)" })
+        return base + " It was less sure of \(days) — look at \(draft.unsureDays.count == 1 ? "that" : "those") first."
     }
 
     // MARK: - Travellers

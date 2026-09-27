@@ -16,17 +16,33 @@ struct EquiMessage: Identifiable, Equatable {
     let isUser: Bool
     var card: EquiCard?
     let sentAt: Date
+    /// The trip this reply was about, card or not — what a follow-up that
+    /// names no trip is taken to mean. Saved in `card_trip_id`.
+    var focusTripID: UUID?
+    /// Follow-up questions offered under the reply. Not saved: they're an
+    /// invitation for the moment, not part of the record.
+    var suggestions: [String] = []
 
     /// `id` and `sentAt` are arguments rather than initialised in place so a
     /// turn read back out of `equi_messages` keeps the identity and the time
     /// it was written — a reloaded transcript that renumbers itself sorts by
     /// "now" and arrives in the wrong order.
-    init(id: UUID = UUID(), text: String, isUser: Bool, card: EquiCard? = nil, sentAt: Date = Date()) {
+    init(
+        id: UUID = UUID(),
+        text: String,
+        isUser: Bool,
+        card: EquiCard? = nil,
+        sentAt: Date = Date(),
+        focusTripID: UUID? = nil,
+        suggestions: [String] = []
+    ) {
         self.id = id
         self.text = text
         self.isUser = isUser
         self.card = card
         self.sentAt = sentAt
+        self.focusTripID = focusTripID ?? card?.tripID
+        self.suggestions = suggestions
     }
 }
 
@@ -60,10 +76,10 @@ struct EquiPrompt: Identifiable, Equatable {
 /// instead of the flat peach canvas, and iMessage-style grouped bubbles
 /// instead of the app's usual flat cards.
 ///
-/// Answers stream in from Apple Intelligence's on-device model, briefed on
-/// every trip the user is on — plan, people and money — rebuilt fresh on
-/// each question so the answer never lags behind something just logged in
-/// the app. See `EquiIntelligence` and `EquiContext`.
+/// Each question is read for which trip and what about, answered in Swift
+/// from the live trip data, and phrased by Apple Intelligence's on-device
+/// model — with a card narrowed to the question and follow-ups under the
+/// newest reply. See `EquiIntelligence`.
 struct EquiAssistantView: View {
     /// Bumped by `RootTabView` every time this tab is selected.
     ///
@@ -141,7 +157,8 @@ struct EquiAssistantView: View {
         ],
         [
             EquiPrompt(symbol: "creditcard", text: "Am I over budget?"),
-            EquiPrompt(symbol: "arrow.left.arrow.right", text: "Settle everyone up"),
+            EquiPrompt(symbol: "arrow.left.arrow.right", text: "Settle up what I owe"),
+            EquiPrompt(symbol: "plus.circle", text: "Add ₹500 for snacks"),
             EquiPrompt(symbol: "chart.pie", text: "Where's the money going?"),
             EquiPrompt(symbol: "person.2", text: "Who still owes me?"),
             EquiPrompt(symbol: "fork.knife", text: "How much on food so far?")
@@ -258,7 +275,9 @@ struct EquiAssistantView: View {
                             EquiBubbleRow(
                                 message: row.message,
                                 isLastInGroup: row.isLastInGroup,
-                                onOpenTrip: onOpenTrip
+                                showsSuggestions: !isThinking && row.id == messages.last?.id,
+                                onOpenTrip: onOpenTrip,
+                                onAsk: { send($0) }
                             )
                             .id(row.id)
                             .padding(.top, row.isFirstInGroup ? 14 : 2)
@@ -710,25 +729,27 @@ struct EquiAssistantView: View {
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
 
-        let recent = messages.map { EquiIntelligence.Turn(isUser: $0.isUser, text: $0.text) }
+        let recent = messages.map {
+            EquiIntelligence.Turn(isUser: $0.isUser, text: $0.text, tripID: $0.focusTripID, card: $0.card)
+        }
+        history.clearSuggestions()
         history.append(EquiMessage(text: trimmed, isUser: true))
         composerFocused = false
         isThinking = true
 
+        // A request to *do* something goes to Equi's hands, not its answers.
+        if let reading = EquiCommandReader.read(trimmed, store: tripStore) {
+            act(on: reading)
+            return
+        }
+
         replyTask?.cancel()
         replyTask = Task { @MainActor in
-            switch EquiIntelligence.availability {
-            case .unavailable(let reason):
-                try? await Task.sleep(for: .milliseconds(400))
-                isThinking = false
-                history.append(EquiMessage(text: reason, isUser: false))
-                return
-            case .ready:
-                break
-            }
-
             var replyID: UUID?
             do {
+                // Equi answers without Apple Intelligence too — from the
+                // figures alone (see `EquiIntelligence`) — so there's no
+                // availability gate here any more.
                 let stream = EquiIntelligence.streamReply(to: trimmed, recent: recent, store: tripStore)
                 for try await chunk in stream {
                     // A cancelled reply is one the user walked away from, not
@@ -740,19 +761,25 @@ struct EquiAssistantView: View {
                     }
 
                     if let replyID {
-                        history.stream(replyID, text: chunk.text, card: chunk.card)
+                        history.stream(replyID, reply: chunk)
                     } else {
                         // Hold the thinking dots until there's something to
-                        // show — the structured answer's first tokens can be
-                        // an empty string while the model opens the field.
-                        guard !chunk.text.isEmpty || chunk.card != nil else { continue }
+                        // read — the card waits for the words that introduce it.
+                        guard !chunk.text.isEmpty else { continue }
 
                         isThinking = false
-                        let message = EquiMessage(text: chunk.text, isUser: false, card: chunk.card)
+                        let message = EquiMessage(
+                            text: chunk.text,
+                            isUser: false,
+                            card: chunk.card,
+                            focusTripID: chunk.focusTripID,
+                            suggestions: chunk.suggestions
+                        )
                         replyID = message.id
                         history.beginReply(message)
                     }
                 }
+                isThinking = false
                 // Saved once, here, rather than on every token: a reply is a
                 // hundred chunks and one row.
                 if let replyID { history.finishReply(replyID) }
@@ -761,10 +788,47 @@ struct EquiAssistantView: View {
                 isThinking = false
                 let apology = "Something went wrong answering that — try again?"
                 if let replyID {
-                    history.stream(replyID, text: apology, card: nil)
+                    history.stream(replyID, reply: EquiIntelligence.Reply(text: apology))
                     history.finishReply(replyID)
                 } else {
                     history.append(EquiMessage(text: apology, isUser: false))
+                }
+            }
+        }
+    }
+
+    /// Carries out a request: says what it's about to do, then hands the
+    /// screen to `EquiAgent`, whose outcome lands back here as Equi's reply —
+    /// even when the job finished with the app in the background, so the
+    /// answer is waiting in the thread when you come back.
+    private func act(on reading: EquiCommandReader.Reading) {
+        replyTask?.cancel()
+        replyTask = Task { @MainActor in
+            // The same beat of thinking dots an answer gets.
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            isThinking = false
+
+            switch reading {
+            case .reply(let text):
+                history.append(EquiMessage(text: text, isUser: false))
+
+            case .task(let task):
+                guard !EquiAgent.shared.isRunning else {
+                    history.append(EquiMessage(text: "I'm still finishing the last job — give me a moment.", isUser: false))
+                    return
+                }
+                history.append(EquiMessage(text: task.opening, isUser: false, focusTripID: task.tripID))
+                // Long enough to read the line above before the screen moves.
+                try? await Task.sleep(for: .milliseconds(1200))
+                guard !Task.isCancelled else { return }
+                EquiAgent.shared.start(task) { outcome, chat in
+                    history.append(EquiMessage(
+                        text: chat,
+                        isUser: false,
+                        focusTripID: outcome?.tripID,
+                        suggestions: outcome?.suggestions ?? []
+                    ))
                 }
             }
         }

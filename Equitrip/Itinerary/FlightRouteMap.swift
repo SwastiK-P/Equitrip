@@ -231,8 +231,10 @@ struct FlightRouteMap: View {
 
     private func coordinate(code: String, name: String?, city: String?) async -> CLLocationCoordinate2D? {
         // "Heathrow Airport" finds the airport; "LHR" alone often finds a
-        // street. The city narrows it when the name is generic.
-        let query = [name.map { "\($0) Airport" }, city, code]
+        // street. The city is left out: bookings saved before the lookup
+        // stopped deriving it from the time zone say "Kolkata" for every
+        // Indian airport, which pulled DEL's pin onto CCU.
+        let query = [name.map { "\($0) Airport" }, code]
             .compactMap { $0 }
             .joined(separator: " ")
 

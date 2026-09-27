@@ -85,12 +85,15 @@ struct HomeView: View {
         case newTrip
         /// A receipt, from capture to a filled-in booking editor, for this trip.
         case receipt(Trip)
+        /// The trip's Weather Twin.
+        case weather(UUID)
 
         var id: String {
             switch self {
             case .chat(let trip): "chat-\(trip.id)"
             case .newTrip: "new-trip"
             case .receipt(let trip): "receipt-\(trip.id)"
+            case .weather(let id): "weather-\(id)"
             }
         }
     }
@@ -206,6 +209,7 @@ struct HomeView: View {
             case .quickAdd(let trip, let day):
                 QuickAddSheet(
                     travellers: trip.travellers,
+                    organiserIDs: trip.organiserIDs,
                     currencyCode: trip.currencyCode,
                     day: day,
                     onSave: {
@@ -238,12 +242,16 @@ struct HomeView: View {
                 ItineraryItemEditor(
                     item: seed,
                     travellers: trip.travellers,
+                    organiserIDs: trip.organiserIDs,
                     currencyCode: trip.currencyCode,
                     isNew: true,
                     onSave: { store.addItem($0, to: trip.id) }
                 )
             }
         }
+        // What Equi presses to put a sheet away after finishing a job with the
+        // screen off — see `EquiAgentTask.cleanup`.
+        .agentTarget("home.sheet.close") { sheet = nil }
         .fullScreenCover(item: $cover) { destination in
             switch destination {
             case .chat(let trip):
@@ -262,6 +270,9 @@ struct HomeView: View {
                         store.addItem($0, to: trip.id)
                     }
                 )
+
+            case .weather(let tripID):
+                WeatherTwinView(tripID: tripID)
             }
         }
         .onAppear {
@@ -355,15 +366,14 @@ struct HomeView: View {
         guard let trip = liveTrip ?? store.currentTrip ?? store.trips.first else { return }
 
         answeredQuickAddRequests = quickAddRequests
-        sheet = .quickAdd(trip, quickAddDay(for: trip))
+        sheet = .quickAdd(trip, QuickAddSheet.day(for: trip))
     }
 
-    /// Today when today is on the trip, and the trip's first day otherwise.
-    private func quickAddDay(for trip: Trip) -> Date {
-        let today = Calendar.current.startOfDay(for: Date())
-        let start = Calendar.current.startOfDay(for: trip.startDate)
-        let end = Calendar.current.startOfDay(for: trip.endDate)
-        return (start...end).contains(today) ? today : start
+    /// Equi pressing Expense: quick add on the trip it's filing against, which
+    /// needn't be the one running — the request may have named another.
+    private func openQuickAddForEqui() {
+        guard let trip = store.trip(EquiAgent.shared.tripID) ?? liveTrip ?? store.currentTrip else { return }
+        sheet = .quickAdd(trip, QuickAddSheet.day(for: trip))
     }
 
     // MARK: - Top bar
@@ -727,6 +737,7 @@ struct HomeView: View {
                 // on the whole cell fought the glass's own swell, and the two
                 // together read as the button flinching.
                 .buttonStyle(.plain)
+                .agentTarget(action.title == "Expense" ? "home.expense" : nil) { openQuickAddForEqui() }
                 .disabled(!isEnabled(action))
             }
         }
@@ -759,7 +770,9 @@ struct HomeView: View {
     private func isEnabled(_ action: QuickAction) -> Bool {
         switch action.title {
         case "Chat": store.currentTrip != nil
-        case "Expense": liveTrip != nil
+        // Lit while Equi is driving: it may be filing against a trip that
+        // hasn't started, and a cursor pressing a dimmed button reads as broken.
+        case "Expense": liveTrip != nil || EquiAgent.shared.isRunning
         case "Receipt": receiptTrip != nil
         default: true
         }
@@ -787,6 +800,12 @@ struct HomeView: View {
                     CurrentTripCard(trip: trip)
                 }
                 .buttonStyle(PressableButtonStyle())
+
+                // The weather over the trip that's on, and what it means for
+                // the plan. Past trips have nothing left to weather.
+                if trip.phase != .past, !trip.items.isEmpty {
+                    WeatherWatchCard(trip: trip) { cover = .weather(trip.id) }
+                }
             }
         } else {
             VStack(alignment: .leading, spacing: 13) {

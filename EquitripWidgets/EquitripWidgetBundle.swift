@@ -15,5 +15,6 @@ struct EquitripWidgetBundle: WidgetBundle {
         TripsWidget()
         AddExpenseControl()
         AskEquiControl()
+        EquiAgentLiveActivity()
     }
 }

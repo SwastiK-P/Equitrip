@@ -155,9 +155,39 @@ struct WidgetSymbolBadge: View {
     }
 }
 
+// MARK: - Shared pictures
+
+/// A picture the app left in `SharedImages`, when there is one.
+func sharedImage(_ key: String?) -> UIImage? {
+    guard let key, let url = SharedImages.fileURL(key) else { return nil }
+    return UIImage(contentsOfFile: url.path)
+}
+
+/// A trip's cover photo as a rounded tile, or its glyph when the app hasn't
+/// saved a cover (or the trip has none).
+struct TripCoverBadge: View {
+    let tripID: UUID
+    let symbol: String
+    let tint: Color
+    var size: CGFloat = 37
+
+    var body: some View {
+        if let image = sharedImage(SharedImages.coverKey(tripID)) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(.rect(cornerRadius: size * 0.32, style: .continuous))
+        } else {
+            WidgetSymbolBadge(symbol: symbol, tint: tint, size: size)
+        }
+    }
+}
+
 // MARK: - Initial avatar
 
-/// A person as a widget can draw them: an initial on a tinted disc.
+/// A person as a widget can draw them: their face when the app has saved it,
+/// otherwise an initial on a tinted disc.
 ///
 /// The snapshot carries names, not photos — a widget has no session to fetch
 /// a profile picture with. The tint is picked from the name's scalars rather
@@ -166,6 +196,8 @@ struct WidgetSymbolBadge: View {
 struct InitialAvatar: View {
     let name: String
     var size: CGFloat = 28
+    /// Their face in `SharedImages`, drawn instead of the initial when saved.
+    var imageKey: String?
     /// A canvas-coloured ring, for avatars that overlap in a stack.
     var ringed = false
 
@@ -181,21 +213,34 @@ struct InitialAvatar: View {
     }
 
     var body: some View {
-        Text(initial)
-            .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
-            .foregroundStyle(tint)
-            .frame(width: size, height: size)
-            // Opaque card under the tint, so an avatar stacked over another
-            // hides it instead of letting the one behind show through.
-            .background {
-                ZStack {
-                    Circle().fill(Brand.card)
-                    Circle().fill(tint.opacity(0.16))
-                }
-            }
+        face
             .overlay {
                 if ringed { Circle().strokeBorder(Brand.canvasTop, lineWidth: 2) }
             }
+    }
+
+    @ViewBuilder
+    private var face: some View {
+        if let image = sharedImage(imageKey) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(.circle)
+        } else {
+            Text(initial)
+                .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .frame(width: size, height: size)
+                // Opaque card under the tint, so an avatar stacked over another
+                // hides it instead of letting the one behind show through.
+                .background {
+                    ZStack {
+                        Circle().fill(Brand.card)
+                        Circle().fill(tint.opacity(0.16))
+                    }
+                }
+        }
     }
 }
 
@@ -212,6 +257,8 @@ struct DayTrack: View {
     let days: Int
     var tint: Color = Brand.accent
     var height: CGFloat = 5
+    /// The unfilled days — lighter on a photo than on the peach canvas.
+    var track: Color = Brand.cardStroke.opacity(0.10)
 
     private var count: Int { min(14, max(1, days)) }
 
@@ -225,7 +272,7 @@ struct DayTrack: View {
         HStack(spacing: 2.5) {
             ForEach(0..<count, id: \.self) { index in
                 Capsule()
-                    .fill(index < filled ? tint : Brand.cardStroke.opacity(0.10))
+                    .fill(index < filled ? tint : track)
                     .frame(maxWidth: .infinity)
             }
         }

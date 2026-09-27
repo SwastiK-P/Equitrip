@@ -47,6 +47,8 @@ struct QuickAddSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let travellers: [Traveller]
+    /// "Organiser pays" divides across every organiser, so "each" needs the count.
+    let organiserIDs: Set<UUID>
     let currencyCode: String
     /// The day this lands on — today, unless the trip's clock disagrees.
     let day: Date
@@ -68,6 +70,7 @@ struct QuickAddSheet: View {
 
     init(
         travellers: [Traveller],
+        organiserIDs: Set<UUID>,
         currencyCode: String,
         day: Date,
         seed: Seed? = nil,
@@ -75,6 +78,7 @@ struct QuickAddSheet: View {
         onSwitchToDetailed: @escaping (ItineraryItem) -> Void
     ) {
         self.travellers = travellers
+        self.organiserIDs = organiserIDs
         self.currencyCode = currencyCode
         self.day = day
         self.seed = seed
@@ -121,6 +125,9 @@ struct QuickAddSheet: View {
             // with no keyboard and no caret, on a screen whose entire premise
             // is that you can type one line and be gone.
             try? await Task.sleep(for: .milliseconds(360))
+            // Not while Equi is filling it in: the keyboard would cover the
+            // rows its cursor is on its way to.
+            guard !EquiAgent.shared.isRunning else { return }
             titleFocused = true
         }
     }
@@ -231,6 +238,7 @@ struct QuickAddSheet: View {
                 .focused($titleFocused)
                 .submitLabel(.done)
             }
+            .agentField("quickAdd.title", text: $title)
             .padding(.horizontal, 16)
             .frame(height: 60)
             .panelSurface(corner: 18)
@@ -252,6 +260,7 @@ struct QuickAddSheet: View {
                 .foregroundStyle(AppTheme.ink)
                 .keyboardType(.decimalPad)
             }
+            .agentField("quickAdd.amount", text: $amount)
             .padding(.horizontal, 16)
             .frame(height: 60)
             .panelSurface(corner: 18)
@@ -307,19 +316,12 @@ struct QuickAddSheet: View {
 
                 return Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
-                        if on {
-                            // Never down to nobody — an expense on no one isn't
-                            // a state the ledger can do anything with.
-                            if participants.count > 1 { participants.remove(traveller.id) }
-                        } else {
-                            participants.insert(traveller.id)
-                        }
-                    }
+                    toggleParticipant(traveller.id)
                 } label: {
                     face(traveller, on: on, mark: "checkmark")
                 }
                 .buttonStyle(.plain)
+                .agentTarget("quickAdd.who.\(traveller.id)") { toggleParticipant(traveller.id) }
             }
         }
     }
@@ -340,6 +342,23 @@ struct QuickAddSheet: View {
                     face(traveller, on: on, mark: "indianrupeesign")
                 }
                 .buttonStyle(.plain)
+                // Equi means "this person paid", so it sets rather than toggles —
+                // pressing the one already chosen mustn't clear it.
+                .agentTarget("quickAdd.payer.\(traveller.id)") {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) { payerID = traveller.id }
+                }
+            }
+        }
+    }
+
+    private func toggleParticipant(_ id: UUID) {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
+            if participants.contains(id) {
+                // Never down to nobody — an expense on no one isn't
+                // a state the ledger can do anything with.
+                if participants.count > 1 { participants.remove(id) }
+            } else {
+                participants.insert(id)
             }
         }
     }
@@ -419,6 +438,7 @@ struct QuickAddSheet: View {
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
+            .agentTarget("quickAdd.split.participants") { split = .participants }
 
             Spacer(minLength: 0)
 
@@ -443,7 +463,11 @@ struct QuickAddSheet: View {
         switch split {
         case .equal: heads = travellers.count
         case .participants: heads = max(1, participants.count)
-        case .organiser, .individual, .custom: heads = 1
+        // Same fallback as `Trip.candidateBearers`: no organisers means everyone.
+        case .organiser:
+            let organisers = travellers.filter { organiserIDs.contains($0.id) }.count
+            heads = organisers > 0 ? organisers : travellers.count
+        case .individual, .custom: heads = 1
         }
         return Money.wholeShare(of: cost, heads: heads)
     }
@@ -474,26 +498,60 @@ struct QuickAddSheet: View {
         // A detected payment happened when the bank said it happened, not when
         // the sheet was opened — an alert read over breakfast about last
         // night's dinner belongs at last night's time.
-        let now = seed?.paidAt ?? Date()
-        let parts = Calendar.current.dateComponents([.hour, .minute], from: now)
+        Self.makeItem(
+            title: title,
+            vendor: seed?.vendor ?? "",
+            amount: Double(amount) ?? 0,
+            day: day,
+            stamp: seed?.paidAt ?? Date(),
+            split: split,
+            participants: participants,
+            payerID: payerID,
+            method: seed?.paymentMethod
+        )
+    }
+
+    /// The booking this sheet saves, from its parts. Static so Equi, filing an
+    /// expense with the screen off, writes exactly what the sheet would have.
+    static func makeItem(
+        title: String,
+        vendor: String = "",
+        amount: Double,
+        day: Date,
+        stamp: Date,
+        split: SplitMode,
+        participants: Set<UUID>,
+        payerID: UUID?,
+        method: PaymentMethod? = nil
+    ) -> ItineraryItem {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: stamp)
 
         return ItineraryItem(
             title: title.trimmingCharacters(in: .whitespaces),
             // Who was paid belongs here whether or not it became the title:
             // the ledger's vendor column is exactly this question, and the CSV
             // export already has a place for it.
-            vendor: seed?.vendor ?? "",
+            vendor: vendor,
             // Category is inferred after the fact — see `commit`. Until then
             // the catch-all, which is what an unclassified thing on a trip is.
             kind: .activity,
             date: day,
             time: .at(parts.hour ?? 12, parts.minute ?? 0, on: day),
-            cost: max(0, Double(amount) ?? 0),
+            cost: max(0, amount),
             split: split,
             participantIDs: participants,
             paidByID: payerID,
-            paymentMethod: payerID == nil ? nil : (seed?.paymentMethod ?? AppSettings.defaultPaymentMethod)
+            paymentMethod: payerID == nil ? nil : (method ?? AppSettings.defaultPaymentMethod)
         )
+    }
+
+    /// Today when today is on the trip, and the trip's first day otherwise —
+    /// a day today is a day an upcoming trip doesn't have.
+    static func day(for trip: Trip) -> Date {
+        let today = Calendar.current.startOfDay(for: Date())
+        let start = Calendar.current.startOfDay(for: trip.startDate)
+        let end = Calendar.current.startOfDay(for: trip.endDate)
+        return (start...end).contains(today) ? today : start
     }
 
     private var saveBar: some View {
@@ -509,6 +567,7 @@ struct QuickAddSheet: View {
         }
         .buttonStyle(.glassProminent)
         .tint(AppTheme.accent)
+        .agentTarget("quickAdd.save") { if canSave { commit() } }
         .disabled(!canSave)
         .opacity(canSave ? 1 : 0.5)
         .padding(.horizontal, 20)
@@ -528,10 +587,14 @@ struct QuickAddSheet: View {
         ))
         dismiss()
 
-        // The classification runs after the booking is already on the timeline.
-        // It takes a moment, and nobody standing at a beach shack should watch
-        // a spinner to find out that snacks are food — `addItem` upserts, so
-        // the second save corrects the row rather than adding another.
+        Self.classify(item, save: onSave)
+    }
+
+    /// The classification runs after the booking is already on the timeline.
+    /// It takes a moment, and nobody standing at a beach shack should watch
+    /// a spinner to find out that snacks are food — `addItem` upserts, so
+    /// the second save corrects the row rather than adding another.
+    static func classify(_ item: ItineraryItem, save: @escaping (ItineraryItem) -> Void) {
         Task { @MainActor in
             var classified = item
             let kind = await ActivityIconSuggester.kind(for: item.title)
@@ -539,7 +602,7 @@ struct QuickAddSheet: View {
             classified.suggestedSymbol = await ActivityIconSuggester.symbol(for: item.title, kind: kind)
 
             guard classified.kind != item.kind || classified.suggestedSymbol != item.suggestedSymbol else { return }
-            onSave(classified)
+            save(classified)
         }
     }
 }

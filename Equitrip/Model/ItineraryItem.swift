@@ -7,7 +7,7 @@ import SwiftUI
 
 // MARK: - Itinerary item
 
-struct ItineraryItem: Identifiable, Hashable {
+struct ItineraryItem: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
     var vendor: String
@@ -38,6 +38,8 @@ struct ItineraryItem: Identifiable, Hashable {
     var suggestedSymbol: String?
     /// Live tracking data, when this is a flight and someone's looked it up.
     var flight: FlightDetails?
+    /// PNR and RailRadar's answer for it, when this is a train.
+    var train: TrainDetails?
     /// Who actually handed over the money. Nil means nobody has said yet, and
     /// the cost sits on the trip without sitting on anybody in particular —
     /// which is exactly the state a group ledger has to be able to represent,
@@ -79,6 +81,7 @@ struct ItineraryItem: Identifiable, Hashable {
         cover: TripPhoto? = nil,
         suggestedSymbol: String? = nil,
         flight: FlightDetails? = nil,
+        train: TrainDetails? = nil,
         paidByID: UUID? = nil,
         paymentMethod: PaymentMethod? = nil,
         receiptURL: URL? = nil,
@@ -105,6 +108,7 @@ struct ItineraryItem: Identifiable, Hashable {
         self.cover = cover
         self.suggestedSymbol = suggestedSymbol
         self.flight = flight
+        self.train = train
         self.paidByID = paidByID
         self.paymentMethod = paymentMethod
         self.receiptURL = receiptURL
@@ -142,6 +146,21 @@ struct ItineraryItem: Identifiable, Hashable {
     var vendorName: String? {
         let trimmed = vendor.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The flight number this booking carries, wherever it was written.
+    ///
+    /// Imports and hand-typed bookings often put "Flight 6E 5307" in the title
+    /// and never fill the flight-number field, so the booking showed as a
+    /// plain card even though everything needed to track it was on screen.
+    /// A tracked flight's own number wins; otherwise title, then vendor.
+    var trackableFlightNumber: String? {
+        if let number = flight?.number, !number.isEmpty { return number }
+        guard kind == .flight else { return nil }
+        for text in [title, vendor] {
+            if let found = BookingText.flightNumbers(in: text.uppercased()).sorted().first { return found }
+        }
+        return nil
     }
 
     /// Start of the day the item falls on — the timeline's grouping key.

@@ -48,8 +48,11 @@ Outside: `EquitripShared/` (compiled into every target), `EquitripWidgets/`,
 - `ContentView` routes launch → onboarding → auth → `RootTabView`.
 - Views get stores via `@Environment(\.tripStore)`, `\.notificationStore`, `\.auditTrail`, `\.toastCenter`,
   `\.detectedExpenses`, `\.gmailSync` (`@Entry` at the bottom of each store's file). Services are `.shared`.
-- Postgres is the only source of truth. No sample data, no offline fallback — failures surface
-  (`TripStore.state`, `writeFailure`). Most queries are in `SupabaseRepository`; `TripStore`, `ChatService`,
+- Postgres is the only source of truth. No sample data. Offline, the app reads the last synced copy
+  (`OfflineCache`, per account, wiped on sign-out). Booking/expense writes, trip creation, audit rows and
+  notifications go through `OfflineOutbox`, a persisted, ordered queue replayed on reconnect: kept on a
+  connectivity error, dropped and reported (`writeFailure`) when the server refuses. Other writes still
+  fail visibly (`TripStore.state`, `writeFailure`). `OfflineBanner` is the `TabView` bottom accessory (inline when the tab bar minimizes). Most queries are in `SupabaseRepository`; `TripStore`, `ChatService`,
   `TravellerDirectory`, `CoverStore`, `MediaStore` also use `AuthService.shared.client`.
 - Assigning `TripStore.trips` republishes the widget/watch snapshot (`WidgetPublisher`) — don't call it yourself.
 - Adaptive layout reads `@Environment(\.pane)`, never `UIDevice`.
