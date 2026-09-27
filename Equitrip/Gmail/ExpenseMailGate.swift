@@ -117,18 +117,26 @@ enum AmountScanner {
     private static let pattern = #"(?:(₹|rs\.?|inr|\$|usd|€|eur|£|gbp)\s*)([0-9][0-9,]*(?:\.[0-9]{1,2})?)|([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(₹|rs\.?|inr|\$|usd|€|eur|£|gbp)\b"#
 
     static func candidates(in text: String) -> [Candidate] {
+        located(in: text).map(\.candidate)
+    }
+
+    /// Each amount with where it sits, as a UTF-16 range. The booking-change
+    /// reader needs the position as well as the figure: which label a refund
+    /// or a new total belongs to is decided by what's written just before it.
+    static func located(in text: String) -> [(candidate: Candidate, range: NSRange)] {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return [] }
         let range = NSRange(text.startIndex..., in: text)
 
-        var found: [Candidate] = []
+        var found: [(candidate: Candidate, range: NSRange)] = []
         for match in regex.matches(in: text, range: range) {
             let symbol = group(match, 1, in: text) ?? group(match, 4, in: text)
             guard let digits = group(match, 2, in: text) ?? group(match, 3, in: text) else { continue }
             guard let value = Double(digits.replacingOccurrences(of: ",", with: "")), value > 0 else { continue }
 
-            found.append(
-                Candidate(value: value, literal: digits, currencyCode: symbol.flatMap { code(for: $0) })
-            )
+            found.append((
+                Candidate(value: value, literal: digits, currencyCode: symbol.flatMap { code(for: $0) }),
+                match.range
+            ))
         }
         return found
     }

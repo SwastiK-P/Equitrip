@@ -10,7 +10,7 @@ Supabase (Postgres + RLS, Auth, Realtime, Storage) is the only backend.
   grepping or listing folders. A Stop hook regenerates it (`scripts/codemap.py`) — never hand-edit.
 - Files are named after their main type: `SplitMode` → `Model/SplitMode.swift`.
 - Files marked ≥0.8k in the map: grep for the symbol, then read that range with offset/limit.
-- Module rules in `.claude/rules/` (Intelligence, Gmail, shared/widget/watch targets) load automatically
+- Module rules in `.claude/rules/` (Intelligence, Gmail, Intents, shared/widget/watch targets) load automatically
   when you read files they cover.
 - Don't read: `project.pbxproj` (folders are synchronized — adding/moving files needs no project
   edit), `build/`, `*.xcassets`, `docs/diagrams/` (slide generators, includes a stale copy of

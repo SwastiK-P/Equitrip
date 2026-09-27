@@ -66,19 +66,19 @@ struct TripConversationEntity: nonisolated Identifiable, nonisolated AppEntity {
 nonisolated struct TripConversationQuery: EntityStringQuery {
 
     func entities(for identifiers: [TripConversationEntity.ID]) async throws -> [TripConversationEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return try await Self.conversations(for: identifiers, in: store)
     }
 
     /// "The Goa group", "Rome chat" — matched on the trip it belongs to.
     func entities(matching string: String) async throws -> [TripConversationEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         let ids = await MainActor.run { TripMatcher.trips(matching: string, in: store.trips).map(\.id) }
         return try await Self.conversations(for: ids, in: store)
     }
 
     func suggestedEntities() async throws -> [TripConversationEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         let ids = await MainActor.run { TripMatcher.byRelevance(store.trips).prefix(10).map(\.id) }
         return try await Self.conversations(for: Array(ids), in: store)
     }

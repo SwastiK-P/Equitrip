@@ -13,11 +13,14 @@ import UIKit
 /// "Tell the Goa group I'm running ten minutes late" — the messages domain's
 /// *send message*, into a trip's group chat.
 ///
-/// The messages domain is all-or-nothing: adopting it means send, draft, edit,
-/// unsend and read status together, with the entities they share. That's the
-/// set in this folder — `DraftChatMessageIntent`, `EditChatMessageIntent`,
-/// `UnsendChatMessageIntent`, `MarkChatReadIntent`, `TripConversationEntity`,
-/// `ChatMessageEntity`, `ChatPersonEntity`.
+/// The messages domain's *message sending* use case is send and draft
+/// together (the build says so if either is missing), with the entities they
+/// share — `DraftChatMessageIntent`, `TripConversationEntity`,
+/// `ChatMessageEntity`, `ChatPersonEntity`. Edit, unsend and read status were
+/// here too and came out: each rebuilt the chat from its newest 400 messages,
+/// so older ones were "not found", and read status marked the whole thread
+/// rather than the message. Those are for the chat screen, where the message
+/// is in front of you.
 ///
 /// Every message goes through `ChatService`, so what Siri sends is the same
 /// row, delivered the same way, as one typed into the thread. Siri confirms
@@ -84,7 +87,9 @@ struct SendChatMessageIntent {
             throw IntentFailure.messageNotSent
         }
 
-        let conversation = try await TripConversationQuery.conversations(for: [trip.id], in: store).first
+        // The message is out by now. A failed read of the thread's metadata
+        // must not turn that into "didn't send" — a retry would post it twice.
+        let conversation = (try? await TripConversationQuery.conversations(for: [trip.id], in: store))?.first
             ?? TripConversationEntity(trip, thread: nil)
         return .result(value: sent.map { ChatMessageEntity($0, in: trip, conversation: conversation, lastReadAt: nil) })
     }

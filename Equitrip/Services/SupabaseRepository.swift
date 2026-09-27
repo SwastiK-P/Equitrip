@@ -41,6 +41,9 @@ final class SupabaseRepository {
     /// Read once while resolving the profile rather than fetched separately,
     /// because every screen wants it and none of them should have to ask.
     private(set) var currentAvatar: (asset: String, url: URL?)?
+    /// `profiles.display_name`. Accounts made outside the app have no `full_name`
+    /// metadata, so this is the only place their real name lives.
+    private(set) var currentName: String?
 
     /// The resolved profile id, if one has been resolved for the current
     /// session. Read-only and non-throwing, for callers that only want to know
@@ -56,6 +59,7 @@ final class SupabaseRepository {
         profileID = nil
         profileOwner = nil
         currentAvatar = nil
+        currentName = nil
     }
 
     enum RepositoryError: LocalizedError {
@@ -105,6 +109,7 @@ final class SupabaseRepository {
             profileID = row.id
             profileOwner = user.id
             currentAvatar = (row.avatar_asset, row.avatar_url.flatMap(URL.init(string:)))
+            currentName = row.display_name
             CurrentUser.adoptUPI(row.upi_id)
             return row.id
         }
@@ -125,6 +130,7 @@ final class SupabaseRepository {
         profileID = inserted.id
         profileOwner = user.id
         currentAvatar = (inserted.avatar_asset, inserted.avatar_url.flatMap(URL.init(string:)))
+        currentName = inserted.display_name
         return inserted.id
     }
 

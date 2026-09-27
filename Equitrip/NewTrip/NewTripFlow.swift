@@ -22,41 +22,61 @@ struct NewTripFlow: View {
 
     @State private var stage: Stage = .source
     @State private var draft = TripDraft()
+    /// The screens actually visited, so Back retraces them.
+    ///
+    /// It used to be a static `previous` on the stage, and every stage's
+    /// answer was `.source` — which meant Back from the review screen walked
+    /// past the form that had just been filled in and landed on the fork, and
+    /// choosing "From scratch" again reset the draft. One mistyped date cost
+    /// the whole trip.
+    @State private var trail: [Stage] = []
+    @State private var route: Route = .manual
+
+    /// Which way into the flow this is. The two routes are different lengths,
+    /// and a progress track that says "3" on a two-screen run is worse than no
+    /// track at all.
+    private enum Route {
+        /// Where, when, who, check.
+        case manual
+        /// Read it, who, check — the document has already answered the first
+        /// two questions, which is the whole point of importing one.
+        case imported
+
+        var steps: Int { rail.count }
+
+        var rail: [StepRail.Step] {
+            self == .manual
+                ? [.place, .dates, .people, .review]
+                : [.read, .people, .review]
+        }
+    }
 
     enum Stage: Int, Hashable {
-        case source, importing, participants, basics, review, join
+        case source, importing, participants, place, dates, review, join
 
         var title: String {
             switch self {
             case .source: "New trip"
             case .importing: "Reading your document"
-            case .participants: "Travellers"
-            case .basics: "Trip basics"
+            case .participants: "Who's coming?"
+            case .place: "Where to?"
+            case .dates: "When?"
             case .review: "Check it over"
             case .join: "Join a trip"
             }
         }
+    }
 
-        /// Where the back button goes. `source` is the exit.
-        var previous: Stage? {
-            switch self {
-            case .source: nil
-            case .importing, .basics, .join: .source
-            case .participants: .source
-            case .review: .source
-            }
-        }
-
-        /// How far along the three-step run this is, or nil for the screens
-        /// that aren't part of it. The fork and the join flow are separate
-        /// errands, not steps toward a trip.
-        var step: Int? {
-            switch self {
-            case .source, .join: nil
-            case .importing, .basics: 1
-            case .participants: 2
-            case .review: 3
-            }
+    /// How far along this route the current screen is, or nil for the screens
+    /// that aren't part of it. The fork and the join flow are separate
+    /// errands, not steps toward a trip.
+    private var step: Int? {
+        switch stage {
+        case .source, .join: nil
+        case .place, .importing: 1
+        case .dates: 2
+        case .participants: route == .manual ? 3 : 2
+        case .review: route.steps
         }
     }
 
@@ -68,10 +88,18 @@ struct NewTripFlow: View {
                 switch stage {
                 case .source:
                     TripSourceStage(
-                        onImport: { go(.importing) },
+                        onImport: {
+                            route = .imported
+                            go(.importing)
+                        },
                         onManual: {
-                            draft = TripDraft()
-                            go(.basics)
+                            // Only a draft the reader built gets thrown away.
+                            // One the person typed is still theirs — backing
+                            // out to the fork and changing their mind about
+                            // the route shouldn't cost them the form.
+                            if draft.wasImported { draft = TripDraft() }
+                            route = .manual
+                            go(.place)
                         },
                         onJoin: { go(.join) }
                     )
@@ -85,19 +113,27 @@ struct NewTripFlow: View {
                             // it has to be answered before the costs mean
                             // anything. A document that named everybody, or
                             // never mentioned a number, skips this.
-                            go(extracted.needsParticipants ? .participants : .review)
+                            //
+                            // Replaces rather than pushes: the import screen is
+                            // finished with, and Back onto it would only hand
+                            // the person a file picker they've already used.
+                            replace(with: extracted.needsParticipants ? .participants : .review)
                         },
                         onManualInstead: {
                             draft = TripDraft()
-                            go(.basics)
+                            route = .manual
+                            replace(with: .place)
                         }
                     )
 
+                case .place:
+                    TripPlaceStage(draft: $draft, onContinue: { go(.dates) })
+
+                case .dates:
+                    TripDatesStage(draft: $draft, onContinue: { go(.participants) })
+
                 case .participants:
                     TripParticipantsStage(draft: $draft, onContinue: { go(.review) })
-
-                case .basics:
-                    TripBasicsStage(draft: $draft, onContinue: { go(.review) })
 
                 case .join:
                     JoinTripFlow()
@@ -152,40 +188,34 @@ struct NewTripFlow: View {
 
     // MARK: - Header
 
+    /// Back on the left, where you are in the middle. The title used to sit
+    /// there with a progress bar under it; the rail says both at once, and
+    /// the question itself is the first thing on each screen anyway.
     private var header: some View {
-        VStack(spacing: 9) {
-            GlassEffectContainer(spacing: 16) {
-                HStack(spacing: 12) {
-                    CircleGlyphButton(
-                        symbol: stage.previous == nil ? "xmark" : "chevron.left",
-                        size: 40
-                    ) {
-                        if let previous = stage.previous {
-                            go(previous, backwards: true)
-                        } else {
-                            dismiss()
-                        }
-                    }
-                    .accessibilityLabel(stage.previous == nil ? "Close" : "Back")
+        GlassEffectContainer(spacing: 16) {
+            HStack(spacing: 12) {
+                CircleGlyphButton(
+                    symbol: trail.isEmpty ? "xmark" : "chevron.left",
+                    size: 40
+                ) { back() }
+                .accessibilityLabel(trail.isEmpty ? "Close" : "Back")
 
-                    Spacer(minLength: 0)
+                Spacer(minLength: 0)
 
+                if let step {
+                    StepRail(steps: route.rail, current: step)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                } else {
                     Text(stage.title)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(AppTheme.ink)
-                        .contentTransition(.opacity)
-
-                    Spacer(minLength: 0)
-
-                    // Balances the back button so the title stays optically centred.
-                    Color.clear.frame(width: 40, height: 40)
+                        .transition(.opacity)
                 }
-            }
 
-            if let step = stage.step {
-                StepTrack(step: step, of: 3)
-                    .padding(.horizontal, 4)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                Spacer(minLength: 0)
+
+                // Balances the back button so the rail stays optically centred.
+                Color.clear.frame(width: 40, height: 40)
             }
         }
         .padding(.horizontal, usesWideSource ? pane.gutter : 20)
@@ -197,36 +227,29 @@ struct NewTripFlow: View {
 
     private var usesWideSource: Bool { stage == .source && pane.isWide }
 
-    private func go(_ next: Stage, backwards: Bool = false) {
+    private func go(_ next: Stage) {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) {
+            trail.append(stage)
+            stage = next
+        }
+    }
+
+    /// Moves on without leaving a way back to where we were — for a screen
+    /// that has done its job and can't usefully be returned to.
+    private func replace(with next: Stage) {
         withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) {
             stage = next
         }
     }
-}
 
-// MARK: - Progress
-
-/// Three cells that fill as the flow advances.
-///
-/// Deliberately not a percentage bar: the steps aren't equal lengths and
-/// nobody is estimating time here. What it answers is "how much more of this
-/// is there", which a form with no visible end is bad at telling you.
-private struct StepTrack: View {
-    let step: Int
-    let of: Int
-
-    var body: some View {
-        HStack(spacing: 5) {
-            ForEach(1...of, id: \.self) { index in
-                Capsule()
-                    .fill(index <= step ? AppTheme.accent : AppTheme.cardStroke.opacity(0.12))
-                    .frame(height: 4)
-                    .frame(maxWidth: .infinity)
+    private func back() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) {
+            if let previous = trail.popLast() {
+                stage = previous
+            } else {
+                dismiss()
             }
         }
-        .animation(.spring(response: 0.42, dampingFraction: 0.85), value: step)
-        .accessibilityElement()
-        .accessibilityLabel("Step \(step) of \(of)")
     }
 }
 
@@ -361,7 +384,7 @@ private struct TripSourceStage: View {
         smallCard(
             symbol: "square.and.pencil",
             title: "From scratch",
-            detail: "Dates, people, done.",
+            detail: "Where, when, who.",
             tint: Palette.greenDeep,
             action: onManual
         )

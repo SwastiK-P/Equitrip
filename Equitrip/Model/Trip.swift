@@ -367,6 +367,19 @@ struct Trip: Identifiable {
         organiserIDs.contains(Traveller.you.id) && !hasLeft(Traveller.you.id)
     }
 
+    /// Anyone still on the trip can add a booking or expense. Invited people
+    /// couldn't, because this used to be `youAreOrganiser` — yet RLS
+    /// (`items_write_active`) already lets every active member write items.
+    /// Trip-level edits (title, dates, roles) stay organiser-only.
+    var youCanAddBookings: Bool {
+        travellers.contains { $0.id == Traveller.you.id } && !hasLeft(Traveller.you.id)
+    }
+
+    /// Organisers edit any booking; everyone else edits the ones they added.
+    func youCanEdit(_ item: ItineraryItem) -> Bool {
+        youAreOrganiser || (youCanAddBookings && item.createdByID == Traveller.you.id)
+    }
+
     /// The code someone types to join. Derived from the trip's id so it's
     /// stable without needing to be stored, and shaped to be read aloud:
     /// uppercase, no vowels (so no accidental words), no 0/O or 1/I.

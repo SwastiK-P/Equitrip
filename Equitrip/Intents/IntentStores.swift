@@ -14,8 +14,11 @@ import Foundation
 /// the system's own (`signin`) or an `IntentFailure` with real words in it.
 nonisolated enum IntentStores {
 
-    static func store() async throws -> TripStore {
-        guard let store = await AppContext.shared.store() else {
+    /// `fresh: false` for snippets and entity lookups, which run many times
+    /// over one request and must not each cost a round trip — see
+    /// `AppContext.store(fresh:)`.
+    static func store(fresh: Bool = true) async throws -> TripStore {
+        guard let store = await AppContext.shared.store(fresh: fresh) else {
             throw AppIntentError.UserActionRequired.signin
         }
         // A sync that failed on an empty store means we know nothing — and
@@ -47,6 +50,9 @@ nonisolated enum IntentFailure: Error, CustomLocalizedStringResourceConvertible 
     case noVoiceMessages
     case noSharedTrip(String)
     case nothingToSend
+    case settlementNotFound
+    case alreadyAnswered
+    case notYourSettlement
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -54,7 +60,10 @@ nonisolated enum IntentFailure: Error, CustomLocalizedStringResourceConvertible 
         case .noVoiceMessages: "Equitrip chats don't take voice messages yet."
         case .noSharedTrip(let names): "You're not on a trip with \(names)."
         case .nothingToSend: "There's nothing to send."
-        case .organiserOnly(let trip): "Only an organiser of \(trip) can change its plan."
+        case .settlementNotFound: "That payment isn't on the trip any more."
+        case .alreadyAnswered: "That payment has already been answered."
+        case .notYourSettlement: "Only the person who was paid can confirm that."
+        case .organiserOnly(let trip): "You can only change bookings you added to \(trip)."
         case .noRepeats: "Equitrip bookings don't repeat. Add each one on its own day."
         case .cannotMoveTrips: "A booking can't move to a different trip. Remove it and add it to the other one."
         case .cannotMarkUnread: "Equitrip can't mark a chat as unread."

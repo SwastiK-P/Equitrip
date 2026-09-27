@@ -81,9 +81,39 @@ struct TripChatView: View {
                 LoadingState(message: "Loading the conversation…")
             }
         }
-        .scrollEdgeEffectStyle(.soft, for: .top)
+        // Tapping anywhere off the `+` menu closes it, like any menu. The
+        // light veil sets the menu apart from the cards behind it.
+        .overlay {
+            if trayOpen {
+                AppTheme.canvasBottom.opacity(0.55)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .contentShape(.rect)
+                    .onTapGesture {
+                        withAnimation(.snappy(duration: 0.26)) { trayOpen = false }
+                    }
+            }
+        }
+        // The safe area already ends at the composer's top, so bottom-leading
+        // here is just above the `+`.
+        .overlay(alignment: .bottomLeading) {
+            if trayOpen, editTarget == nil {
+                ChatComposeMenu(onTool: use)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 14)
+                    .readableWidth()
+                    .transition(
+                        .scale(scale: 0.3, anchor: .bottomLeading)
+                            .combined(with: .opacity)
+                    )
+            }
+        }
+        // Soft at the bottom too (asked for on 2026-09-24): the composer is
+        // bare glass now, so the thread fades under it instead of meeting a
+        // frosted bar edge.
+        .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
         .safeAreaBar(edge: .top, spacing: 0) { topBar }
-        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .safeAreaBar(edge: .bottom, spacing: 0) { composer }
         .task { await chat.start(); await chat.markRead() }
         .onDisappear { chat.stop() }
         // "Tell them I'm on my way" — see `OnscreenEntities`.
@@ -221,9 +251,6 @@ struct TripChatView: View {
         .onChange(of: composerFocused) { _, focused in
             if focused { scrollToBottom(proxy) }
         }
-        .onChange(of: trayOpen) { _, open in
-            if open { scrollToBottom(proxy) }
-        }
         .overlay(alignment: .bottomTrailing) {
             if !isAtBottom, !chat.messages.isEmpty {
                 JumpToLatestButton(unseen: unseenCount) {
@@ -356,6 +383,7 @@ struct TripChatView: View {
 
     private func use(_ tool: ChatComposeTool) {
         composerFocused = false
+        withAnimation(.snappy(duration: 0.26)) { trayOpen = false }
         switch tool {
         case .photo: choosingPhoto = true
         case .place: sheet = .place
@@ -574,15 +602,22 @@ struct TripChatView: View {
             .containerRelativeFrame(.vertical, alignment: .center)
         } else {
             VStack(spacing: 8) {
-                ZStack {
-                    Circle()
-                        .fill(liveTrip.tint.opacity(0.14))
-                        .frame(width: 48, height: 48)
-
-                    Image(systemName: liveTrip.symbol)
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(liveTrip.tint)
-                }
+                // The empty-state opening's framed photo, scaled down, so the
+                // header doesn't swap the trip's picture for a generic symbol
+                // once the first message arrives.
+                DestinationImage(
+                    query: liveTrip.destination,
+                    photo: liveTrip.cover,
+                    fallbackSymbol: liveTrip.symbol,
+                    fallbackTint: liveTrip.tint,
+                    onResolve: { store.setCover($0, for: liveTrip.id) }
+                )
+                .frame(width: 56, height: 56)
+                .clipShape(.rect(cornerRadius: 12, style: .continuous))
+                .padding(3)
+                .background(.white, in: .rect(cornerRadius: 15, style: .continuous))
+                .shadow(color: AppTheme.softShadow(.light), radius: 10, y: 4)
+                .accessibilityHidden(true)
 
                 Text(liveTrip.title)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
@@ -628,8 +663,7 @@ struct TripChatView: View {
             focus: $composerFocused,
             onSend: sendDraft,
             onCancelContext: cancelContext,
-            onTyping: { chat.noteTyping() },
-            onTool: use
+            onTyping: { chat.noteTyping() }
         )
     }
 

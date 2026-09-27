@@ -30,6 +30,9 @@ final class AppNavigator {
         /// A trip's group chat, optionally with words already in the composer
         /// — Siri's "draft a message" leaves the sending to the person.
         case chat(tripID: UUID, draft: String?)
+        /// The Settle tab, on a trip when one is named, with a payment's
+        /// review open when one is — a Siri card's "Settle up" and "Review".
+        case settle(tripID: UUID?, settlementID: UUID?)
     }
 
     /// What a trip's own screen should put up once it's showing that trip.

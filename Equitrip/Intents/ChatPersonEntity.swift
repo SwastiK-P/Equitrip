@@ -36,7 +36,7 @@ struct ChatPersonEntity: nonisolated Identifiable, nonisolated AppEntity {
 nonisolated struct ChatPersonQuery: EntityStringQuery {
 
     func entities(for identifiers: [ChatPersonEntity.ID]) async throws -> [ChatPersonEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             let wanted = Set(identifiers)
             return Self.everyone(in: store.trips).filter { wanted.contains($0.id) }.map(ChatPersonEntity.init)
@@ -44,7 +44,7 @@ nonisolated struct ChatPersonQuery: EntityStringQuery {
     }
 
     func entities(matching string: String) async throws -> [ChatPersonEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             Self.everyone(in: TripMatcher.byRelevance(store.trips))
                 .filter { $0.name.localizedStandardContains(string) || ($0.email?.localizedStandardContains(string) ?? false) }
@@ -53,7 +53,7 @@ nonisolated struct ChatPersonQuery: EntityStringQuery {
     }
 
     func suggestedEntities() async throws -> [ChatPersonEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             Self.everyone(in: TripMatcher.byRelevance(store.trips))
                 .filter { $0.id != Traveller.you.id }

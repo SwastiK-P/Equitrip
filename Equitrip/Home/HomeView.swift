@@ -16,6 +16,8 @@ struct HomeView: View {
     @Environment(\.notificationStore) private var notifications
     @Environment(\.detectedExpenses) private var detections
     @Environment(\.gmailSync) private var gmailSync
+    @Environment(\.bookingChanges) private var bookingChanges
+    @Environment(\.bookingChangeSync) private var bookingSync
     @Environment(\.pane) private var pane
 
     var userName: String?
@@ -60,6 +62,8 @@ struct HomeView: View {
         case detailedAdd(Trip, ItineraryItem)
         /// The queue of payments read out of Gmail.
         case detected(Trip)
+        /// Cancellations and reschedules read out of Gmail, across every trip.
+        case bookingChanges
         /// A trip you've been asked to join, before you've answered.
         case invitation(TripInvitation)
 
@@ -70,6 +74,7 @@ struct HomeView: View {
             case .quickAdd(let trip, _): "quick-\(trip.id)"
             case .detailedAdd(_, let seed): "detailed-\(seed.id)"
             case .detected(let trip): "detected-\(trip.id)"
+            case .bookingChanges: "booking-changes"
             case .invitation(let invite): "invitation-\(invite.id)"
             }
         }
@@ -185,6 +190,7 @@ struct HomeView: View {
                 // Pull-to-refresh on Home is the gesture people use to mean
                 // "is there anything new" — the mailbox is part of the answer.
                 gmailSync?.sync(for: liveTrip, force: true)
+                bookingSync?.sync(force: true)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
             .tabAlignedHeader { topBar }
@@ -224,6 +230,9 @@ struct HomeView: View {
 
             case .detected(let trip):
                 DetectedExpensesSheet(trip: trip)
+
+            case .bookingChanges:
+                BookingChangesSheet()
 
             case .detailedAdd(let trip, let seed):
                 ItineraryItemEditor(
@@ -267,9 +276,9 @@ struct HomeView: View {
 
     // MARK: - Inbox
 
-    /// The three cards that are asking you something: a trip you've been
-    /// invited to, a payment somebody says they made, and expenses read out of
-    /// the mailbox that nobody has filed yet.
+    /// The cards that are asking you something: a trip you've been invited
+    /// to, a payment somebody says they made, a booking an email says has
+    /// changed, and expenses read out of the mailbox that nobody has filed yet.
     ///
     /// Grouped as one block rather than three siblings because on iPad they
     /// travel together into the second column, and because all three are the
@@ -280,9 +289,13 @@ struct HomeView: View {
         let invitations = store.invitations
         let settlements = store.settlementsAwaitingYou
         let detected = liveTrip.flatMap { detectedCount > 0 ? $0 : nil }
+        let changed = bookingChanges.waiting()
+        let updated = bookingChanges.unseenAutomatic
 
-        if !invitations.isEmpty || !settlements.isEmpty || detected != nil {
-            VStack(alignment: .leading, spacing: pane.sectionSpacing) {
+        if !invitations.isEmpty || !settlements.isEmpty || detected != nil || !changed.isEmpty || !updated.isEmpty {
+            // Tighter than between sections: these are one group of
+            // questions, not separate parts of the page.
+            VStack(alignment: .leading, spacing: 10) {
                 // First, and above the settlement card, because it is the
                 // only thing on this screen about a trip you are not yet
                 // on — and because somebody is waiting on the answer.
@@ -297,6 +310,14 @@ struct HomeView: View {
                         entries: settlements,
                         onOpen: onReviewSettlement
                     )
+                }
+
+                // Above the expenses: a booking that moved changes what's
+                // about to happen, not just what it cost.
+                if !changed.isEmpty || !updated.isEmpty {
+                    BookingChangesInboxCard(waiting: changed, applied: updated) {
+                        sheet = .bookingChanges
+                    }
                 }
 
                 if let trip = detected {
@@ -550,12 +571,7 @@ struct HomeView: View {
             }
             .buttonStyle(.glassProminent)
             .tint(AppTheme.accent)
-            // Full width on a phone, where full width *is* a button's width.
-            // Capped on iPad: the same pill stretched across a 600pt column
-            // stops reading as a button and starts reading as a banner, and
-            // its label ends up floating alone in the middle of it.
-            .frame(maxWidth: pane.isRegular ? 340 : .infinity)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
             .padding(.top, 18)
         }
         .padding(pane.isRegular ? 24 : 20)

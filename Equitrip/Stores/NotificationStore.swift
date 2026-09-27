@@ -294,6 +294,26 @@ extension NotificationStore {
         )
     }
 
+    /// A change somebody applied from a travel company's email, in the
+    /// company's terms: "Flight 6E 5307 was rescheduled", not "Swastik
+    /// changed Flight 6E 5307". The body says whose mail it came from, so
+    /// anyone who doubts it knows who to ask.
+    func announce(_ notice: BookingNotice, about itemID: UUID?, in trip: Trip, removed: Bool = false) {
+        let recipients = audience(of: trip)
+        guard !recipients.isEmpty else { return }
+
+        post(
+            AppNotification(
+                kind: removed ? .bookingRemoved : .bookingChanged,
+                title: notice.title,
+                body: "\(notice.body) · from \(actor())'s mail",
+                tripID: trip.id,
+                itemID: itemID
+            ),
+            to: recipients
+        )
+    }
+
     /// Somebody paid. Goes to everybody the cost lands on — purely as news:
     /// the payment is taken as confirmed the moment it's recorded, and
     /// anyone who thinks it's wrong reports it from the booking itself

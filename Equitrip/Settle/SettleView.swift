@@ -398,25 +398,29 @@ struct SettleView: View {
     // MARK: - Empty
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 40, weight: .semibold))
+        VStack(spacing: 14) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(AppTheme.positive)
+                .frame(width: 52, height: 52)
+                .background(AppTheme.positive.opacity(0.12), in: .circle)
 
-            VStack(spacing: 4) {
-                Text("Nothing to settle")
-                    .font(.system(size: 16, weight: .semibold))
+            VStack(spacing: 5) {
+                Text("All square")
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(AppTheme.ink)
 
-                Text("Once a trip has payments recorded, this is where the group squares up.")
+                Text("When someone pays for a booking, who owes whom will show up here.")
                     .font(.system(size: 13))
                     .foregroundStyle(AppTheme.inkSecondary)
                     .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+                    .frame(maxWidth: 260)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        .padding(.vertical, 32)
         .padding(.horizontal, 24)
         .cardSurface(corner: 24)
     }

@@ -20,18 +20,22 @@ final class AuthService {
 
     var isSignedIn: Bool { session != nil }
 
-    /// Display name from the signup metadata, falling back to the email.
-    /// The signed-in address. Surfaced here so callers don't have to import
-    /// the Auth module just to read one string off the session.
-    var email: String? { session?.user.email }
+    /// The profile row's name, filled in by `bindIdentity`.
+    private(set) var profileName: String?
 
+    /// Signup metadata first, then the profile row, then the email.
     var displayName: String? {
         guard let user = session?.user else { return nil }
         if case let .string(name)? = user.userMetadata["full_name"], !name.isEmpty {
             return name
         }
+        if let profileName, !profileName.isEmpty { return profileName }
         return user.email
     }
+
+    /// The signed-in address. Surfaced here so callers don't have to import
+    /// the Auth module just to read one string off the session.
+    var email: String? { session?.user.email }
 
     private init() {
         client = SupabaseClient(
@@ -89,6 +93,8 @@ final class AuthService {
         CurrentUser.adoptEmail(email)
         if let id = try? await SupabaseRepository.shared.resolveProfile() {
             CurrentUser.adoptID(id)
+            profileName = SupabaseRepository.shared.currentName
+            CurrentUser.adopt(displayName)
             if let face = SupabaseRepository.shared.currentAvatar {
                 CurrentUser.adoptAvatar(asset: Traveller.artwork(for: face.asset), url: face.url)
             }
@@ -98,6 +104,7 @@ final class AuthService {
     func signOut() async {
         try? await client.auth.signOut()
         session = nil
+        profileName = nil
         forgetIdentity()
         // The widgets and the watch both hold a copy of the last account's
         // balance, and neither can find out on its own that it's gone.

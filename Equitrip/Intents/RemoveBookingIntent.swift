@@ -27,7 +27,7 @@ struct RemoveBookingIntent {
               let item = trip.items.first(where: { $0.id == entity.id })
         else { throw IntentFailure.bookingNotFound }
 
-        guard trip.youAreOrganiser else { throw IntentFailure.organiserOnly(trip.title) }
+        guard trip.youCanEdit(item) else { throw IntentFailure.organiserOnly(trip.title) }
 
         if item.cost > 0, let payerID = item.paidByID {
             let payer = payerID == Traveller.you.id ? "your" : "\(trip.traveller(payerID)?.name ?? "someone")'s"

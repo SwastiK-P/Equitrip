@@ -8,26 +8,29 @@ import SwiftUI
 /// Connecting the mailbox, and saying plainly what that means.
 ///
 /// This screen is asking for read access to somebody's email, which is the
-/// largest thing this app ever asks for. So it says the three things that
-/// actually bound it — only while a trip is running, only the payment mail,
-/// and the reading happens on the phone — before the button, not after it in
-/// a footnote. Anything less and the honest answer to "what is this doing with
+/// largest thing this app ever asks for. So it says the things that actually
+/// bound it — only around a trip, only payment and booking mail, and the
+/// reading happens on the phone — before the button, not after it in a
+/// footnote. Anything less and the honest answer to "what is this doing with
 /// my mail" is "I don't know", which is not an answer a person should have to
 /// accept to split a dinner bill.
 struct GmailSettingsSheet: View {
     @Environment(\.tripStore) private var store
     @Environment(\.detectedExpenses) private var detections
     @Environment(\.gmailSync) private var sync
+    @Environment(\.bookingChangeSync) private var bookingSync
+    @Environment(\.bookingChanges) private var bookingChanges
 
     @State private var account = GmailAccount.shared
     @State private var confirmingDisconnect = false
+    @State private var showingBookingChanges = false
 
     private var liveTrip: Trip? { store.trips.first { $0.phase == .live } }
 
     var body: some View {
         SettingsSheetScaffold(
-            title: "Expense detection",
-            caption: "Reads the payment alerts your bank emails you while a trip is running, and offers them as expenses to add."
+            title: "Gmail",
+            caption: "Reads your bank's payment alerts while a trip is running, and booking cancellations and reschedules in the month before one."
         ) {
             VStack(spacing: 14) {
                 accountCard
@@ -57,7 +60,11 @@ struct GmailSettingsSheet: View {
 
                 if account.isConnected {
                     activityCard
-                } else {
+                }
+
+                bookingChangesCard
+
+                if !account.isConnected {
                     // Once the mailbox is connected the promises have already
                     // been read and agreed to; the sheet becomes a status
                     // screen instead of a pitch.
@@ -65,6 +72,7 @@ struct GmailSettingsSheet: View {
                 }
             }
         }
+        .sheet(isPresented: $showingBookingChanges) { BookingChangesSheet() }
         .alert("Disconnect Gmail?", isPresented: $confirmingDisconnect) {
             Button("Disconnect", role: .destructive) {
                 Task { await account.disconnect() }
@@ -212,6 +220,90 @@ struct GmailSettingsSheet: View {
         .cardSurface(corner: 22)
     }
 
+    // MARK: - Booking changes
+
+    /// Its own card and its own switch: it reads outside the running trip,
+    /// which the expense switch never promised.
+    private var bookingChangesCard: some View {
+        VStack(spacing: 0) {
+            if let bookingSync {
+                toggle(
+                    "Watch for booking changes",
+                    detail: "Cancellations and reschedules for trips starting within 30 days.",
+                    isOn: Binding(get: { bookingSync.isEnabled }, set: { bookingSync.isEnabled = $0 })
+                )
+                .disabled(!account.isConnected)
+                .opacity(account.isConnected ? 1 : 0.5)
+
+                Hairline(inset: 16)
+
+                toggle(
+                    "Apply changes automatically",
+                    detail: "Off: every change waits for you to confirm. On: when the booking is unmistakable, it's applied while you watch — with Undo.",
+                    isOn: Binding(get: { bookingSync.appliesAutomatically }, set: { bookingSync.appliesAutomatically = $0 })
+                )
+
+                Hairline(inset: 16)
+
+                toggle(
+                    "Tell the trip chat",
+                    detail: "Post a note in the group's chat when a change is applied.",
+                    isOn: Binding(get: { bookingSync.postsToChat }, set: { bookingSync.postsToChat = $0 })
+                )
+
+                Hairline(inset: 16)
+            }
+
+            Button {
+                showingBookingChanges = true
+            } label: {
+                HStack(spacing: 12) {
+                    IconTile(symbol: "calendar.badge.clock", size: 32, corner: 10)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Booking changes")
+                            .font(.system(size: 15))
+                            .foregroundStyle(AppTheme.ink)
+                        Text("Everything found, and what was done about it")
+                            .font(.system(size: 12))
+                            .foregroundStyle(AppTheme.inkTertiary)
+                    }
+                    Spacer(minLength: 6)
+                    let count = bookingChanges.waiting().count
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(AppTheme.inkTertiary)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AppTheme.inkTertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .contentShape(.rect)
+            }
+            .buttonStyle(PressableButtonStyle())
+        }
+        .cardSurface(corner: 22)
+    }
+
+    private func toggle(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 15))
+                    .foregroundStyle(AppTheme.ink)
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppTheme.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .tint(AppTheme.accent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+    }
+
     private var lastCheckedText: String {
         guard let last = sync?.lastSyncedAt else { return "Not yet" }
         let minutes = Int(Date().timeIntervalSince(last) / 60)
@@ -246,16 +338,16 @@ struct GmailSettingsSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             promise(
                 symbol: "calendar.badge.clock",
-                title: "Only while a trip is running",
-                detail: "Between trips the app doesn't open your mailbox at all."
+                title: "Only around your trips",
+                detail: "Payment alerts while a trip is running; booking changes from 30 days before it starts. Otherwise the app doesn't open your mailbox at all."
             )
 
             Hairline(inset: 16)
 
             promise(
                 symbol: "line.3.horizontal.decrease",
-                title: "Only payment alerts",
-                detail: "The search asks Gmail for bank and payment mail. Promotions, newsletters and personal mail are excluded before anything is downloaded."
+                title: "Only payment and booking mail",
+                detail: "The search asks Gmail for payment alerts and for cancellations and reschedules. Promotions, newsletters and personal mail are excluded before anything is downloaded."
             )
 
             Hairline(inset: 16)
@@ -270,8 +362,8 @@ struct GmailSettingsSheet: View {
 
             promise(
                 symbol: "hand.raised",
-                title: "Nothing is added by itself",
-                detail: "A detected payment waits for you to name it and say who it was for."
+                title: "Money never moves by itself",
+                detail: "A detected payment waits for you to name it and split it. Every booking change asks you to confirm first, unless you turn on applying them automatically."
             )
         }
         .cardSurface(corner: 22)

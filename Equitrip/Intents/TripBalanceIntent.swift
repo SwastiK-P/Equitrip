@@ -40,7 +40,7 @@ struct TripBalanceIntent: AppIntent {
     }
 
     @MainActor
-    func perform() async throws -> some ReturnsValue<Double> & ProvidesDialog & ShowsSnippetView {
+    func perform() async throws -> some ReturnsValue<Double> & ProvidesDialog & ShowsSnippetIntent {
         let store = try await IntentStores.store()
         guard !store.trips.isEmpty else { throw IntentFailure.noTrips }
 
@@ -57,20 +57,12 @@ struct TripBalanceIntent: AppIntent {
         return .result(
             value: answer.net,
             dialog: IntentDialog(full: "\(answer.full)", supporting: "\(answer.supporting)"),
-            view: SiriBalanceSnippet(
-                tripTitle: answer.title,
-                net: answer.net,
-                currencyCode: answer.code,
-                transfers: answer.transfers
-            )
+            snippetIntent: BalanceSnippetIntent(trip: chosen.map(TripEntity.init))
         )
     }
 
     private struct Answer {
-        var title: String
         var net: Double
-        var code: String
-        var transfers: [(name: String, amount: Double, youPay: Bool)]
         var full: String
         var supporting: String
     }
@@ -86,27 +78,40 @@ struct TripBalanceIntent: AppIntent {
                 let other = transfer.from == you ? transfer.to : transfer.from
                 return (name: trip.traveller(other)?.name ?? "Someone", amount: transfer.amount, youPay: transfer.from == you)
             }
+        let waiting = trip.pendingSettlements.filter(\.youAreRecipient).count
+        var full = sentence(net: net, transfers: transfers, code: trip.currencyCode, trip: trip.title)
+        if waiting > 0 {
+            full += waiting == 1
+                ? " One payment is waiting for you to confirm."
+                : " \(waiting) payments are waiting for you to confirm."
+        }
         return Answer(
-            title: trip.title,
             net: net,
-            code: trip.currencyCode,
-            transfers: transfers,
-            full: sentence(net: net, transfers: transfers, code: trip.currencyCode, trip: trip.title),
-            supporting: net == 0 ? "All square on \(trip.title)." : "Here's \(trip.title)."
+            full: full,
+            // The card shows the figures; the line above it only has to
+            // say which trip they're for.
+            supporting: net == 0 ? "All square on \(trip.title)." : "Here's where you stand on \(trip.title)."
         )
     }
 
-    /// Every trip at once, in the most common currency — the Home hero's
-    /// figures, and its honesty about mixed currencies.
+    /// Every trip at once, in the most common currency, from what's still
+    /// *left* on each — the same figure the single-trip answer uses. The
+    /// store's portfolio totals count what was ever owed, so somebody who had
+    /// paid everything back was still told they owed it.
     @MainActor
     private static func portfolioAnswer(_ store: TripStore) -> Answer {
         let code = store.primaryCurrency
-        let owed = store.owedToYou
-        let owe = store.youOwe
-        let full = owed == 0 && owe == 0
-            ? "You're all square across your trips."
-            : "Across your trips, you're owed \(Money.format(owed, code: code)) and you owe \(Money.format(owe, code: code))."
-        return Answer(title: "All trips", net: owed - owe, code: code, transfers: [], full: full, supporting: "Across all your trips.")
+        let you = Traveller.you.id
+        let balances = store.trips.filter { $0.currencyCode == code }.map { $0.remainingBalance(for: you) }
+        let owed = balances.filter { $0 > 0 }.reduce(0, +)
+        let owe = -balances.filter { $0 < 0 }.reduce(0, +)
+        let full: String = switch (owed > 0, owe > 0) {
+        case (false, false): "You're all square across your trips."
+        case (true, false): "Across your trips, you're owed \(Money.format(owed, code: code))."
+        case (false, true): "Across your trips, you owe \(Money.format(owe, code: code))."
+        case (true, true): "Across your trips, you're owed \(Money.format(owed, code: code)) and you owe \(Money.format(owe, code: code))."
+        }
+        return Answer(net: owed - owe, full: full, supporting: "Here's every trip.")
     }
 
     /// "On Goa, you owe Ed ₹1,200 and Priya ₹800."

@@ -20,7 +20,9 @@ struct BalancePage: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                if snapshot.balanceIsMeaningful {
+                // Home shows its full card at ₹0 as soon as there's a trip, and
+                // the watch matches it; the quiet line is only for no trips.
+                if snapshot.balanceIsMeaningful || snapshot.activeTripCount > 0 {
                     hero(snapshot)
                 } else {
                     quietHero(snapshot)
@@ -93,8 +95,8 @@ struct BalancePage: View {
         }
     }
 
-    /// Before anything has been paid for there is no position to report, and
-    /// "Settled · all square" would be a lie on a trip that hasn't started.
+    /// With no trip at all there is no position to report — a ₹0 card would be
+    /// a balance for nothing.
     private func quietHero(_ snapshot: EquitripSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Nothing spent yet")

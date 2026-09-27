@@ -47,12 +47,17 @@ final class AppContext {
     /// the next account never answers Siri with the last one's trips.
     func reset() {
         headless = nil
+        lastHeadlessSync = .distantPast
     }
 
     /// The UI's store when there is one; otherwise a headless one, signed in
     /// from the persisted session and synced fresh. Nil when nobody is signed
     /// in — the one thing no background caller can fix.
-    func store() async -> TripStore? {
+    ///
+    /// `fresh: false` is for callers that run again and again over one
+    /// request — a snippet redrawing after a button, an entity lookup — and
+    /// want whatever store there is rather than another round trip.
+    func store(fresh: Bool = true) async -> TripStore? {
         if let uiStore {
             // Launched straight into the foreground by an intent: the screen
             // exists, but its first sync may not have landed yet, and an
@@ -61,6 +66,34 @@ final class AppContext {
             return uiStore
         }
 
+        if !fresh, let headless, lastHeadlessSync != .distantPast {
+            return headless.store
+        }
+
+        // One Siri request resolves its trip, runs the intent and draws the
+        // snippet at the same moment, and each used to see a store that had
+        // never synced — so a cold launch restored the session and pulled the
+        // whole trip graph two or three times over. Everyone arriving while a
+        // load is under way waits on that one.
+        if let loading { return await loading.value }
+
+        // Fresh for each answer, within reason. One Siri request resolves its
+        // entities several times over — a sync per lookup would be a network
+        // round trip per word — but a background process can also live for
+        // minutes, and a watch confirming a settlement against a list from
+        // before it was withdrawn is the bug `WatchBridge` guards against.
+        if let headless, Date().timeIntervalSince(lastHeadlessSync) <= Self.headlessFreshness {
+            return headless.store
+        }
+
+        let task = Task { await loadHeadless() }
+        loading = task
+        let store = await task.value
+        loading = nil
+        return store
+    }
+
+    private func loadHeadless() async -> TripStore? {
         let auth = AuthService.shared
         if !auth.isSignedIn {
             await auth.restore()
@@ -76,18 +109,12 @@ final class AppContext {
         }()
         headless = context
 
-        // Fresh for each answer, within reason. One Siri request resolves its
-        // entities several times over — a sync per lookup would be a network
-        // round trip per word — but a background process can also live for
-        // minutes, and a watch confirming a settlement against a list from
-        // before it was withdrawn is the bug `WatchBridge` guards against.
-        if Date().timeIntervalSince(lastHeadlessSync) > Self.headlessFreshness {
-            await context.store.sync()
-            lastHeadlessSync = Date()
-        }
+        await context.store.sync(includeInvitations: false)
+        lastHeadlessSync = Date()
         return context.store
     }
 
+    private var loading: Task<TripStore?, Never>?
     private var lastHeadlessSync = Date.distantPast
     private static let headlessFreshness: TimeInterval = 20
 }

@@ -70,6 +70,15 @@ struct RootTabView: View {
     /// and because the sync has to survive a tab switch mid-read.
     @State private var detections = DetectedExpenseStore()
     @State private var gmailSync: GmailExpenseSync?
+    /// Cancellations and reschedules read out of the mailbox, and their loop.
+    /// Here for the same reasons as the expense queue — and because an
+    /// automatic reschedule edits the store, which lives here too.
+    @State private var bookingChanges = BookingChangeStore()
+    @State private var bookingSync: BookingChangeSync?
+    /// The change being put in front of the person, and the ones they've said
+    /// "not now" to this session — those wait on Home instead of asking again.
+    @State private var reviewingChange: ReviewRequest?
+    @State private var snoozedChanges: Set<String> = []
     /// Requests from outside the view tree. See `consumeNavigation`.
     @State private var navigator = AppNavigator.shared
 
@@ -155,6 +164,8 @@ struct RootTabView: View {
         .environment(\.tripZoomNamespace, tripZoom)
         .environment(\.detectedExpenses, detections)
         .environment(\.gmailSync, gmailSync)
+        .environment(\.bookingChanges, bookingChanges)
+        .environment(\.bookingChangeSync, bookingSync)
         .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
             guard AppSettings.shakeToAddExpense else { return }
 
@@ -180,6 +191,19 @@ struct RootTabView: View {
                 duration: .seconds(5)
             ))
         }
+        // Its own anchor: two `sheet` modifiers on one view fight, and the
+        // settlement sheet already has this one.
+        .background {
+            Color.clear.sheet(item: $reviewingChange) { request in
+                // Outside the `.environment` modifiers above, so it's handed
+                // the stores itself.
+                BookingChangeReviewSheet(firstID: request.id) { snoozedChanges.insert($0) }
+                    .environment(\.tripStore, store)
+                    .environment(\.bookingChanges, bookingChanges)
+                    .environment(\.bookingChangeSync, bookingSync)
+            }
+        }
+        .onChange(of: bookingChanges.waiting().map(\.id)) { _, _ in promptNextChange() }
         .sheet(item: $incomingSettlement) { settlement in
             if let trip = store.trip(settlement.tripID) {
                 SettlementReviewSheet(trip: trip, settlement: settlement)
@@ -217,6 +241,7 @@ struct RootTabView: View {
             // so a confirmation lands the instant it happens, not on the next
             // pull-to-refresh.
             if gmailSync == nil { gmailSync = GmailExpenseSync(detections: detections) }
+            if bookingSync == nil { bookingSync = BookingChangeSync(changes: bookingChanges, store: store) }
 
             async let trips: Void = store.sync()
             async let feed: Void = notifications.load()
@@ -226,6 +251,16 @@ struct RootTabView: View {
             // After the trips land, not before: the sync needs to know whether
             // one is actually running, and asks the store to find out.
             gmailSync?.sync(for: liveTrip)
+            bookingSync?.sync()
+
+            #if DEBUG
+            // A fixture email handed in at launch, read as if it had arrived:
+            // `SIMCTL_CHILD_EQUITRIP_BOOKING_MAIL="…" xcrun simctl launch …`.
+            if let fixture = ProcessInfo.processInfo.environment["EQUITRIP_BOOKING_MAIL"] {
+                _ = await bookingSync?.read(pasted: fixture)
+            }
+            #endif
+            promptNextChange()
 
             // A Siri or Spotlight request that launched the app is usually
             // about a trip, and was waiting for exactly this.
@@ -242,9 +277,11 @@ struct RootTabView: View {
             // app came forward, so it is already waiting.
             consumePendingControlRoute()
             gmailSync?.sync(for: liveTrip)
+            bookingSync?.sync()
         }
         .onChange(of: store.trips.count) { _, _ in
             gmailSync?.sync(for: liveTrip)
+            bookingSync?.sync()
             consumeNavigation()
         }
         .onChange(of: navigator.request?.id) { _, id in
@@ -323,6 +360,11 @@ struct RootTabView: View {
     private func consumeNavigation() {
         guard let destination = navigator.takeRequest() else { return }
 
+        if case .settle(let tripID, let settlementID) = destination {
+            openSettle(tripID: tripID, settlementID: settlementID, for: destination)
+            return
+        }
+
         let tripID: UUID
         switch destination {
         case .trip(let id): tripID = id
@@ -334,6 +376,8 @@ struct RootTabView: View {
         case .chat(let id, let draft):
             tripID = id
             navigator.focus(.chat(draft: draft), on: id)
+        case .settle:
+            return
         }
 
         guard let trip = store.trip(tripID) else {
@@ -342,6 +386,23 @@ struct RootTabView: View {
         }
         store.open(trip)
         selection = .itinerary
+    }
+
+    /// Settle, with a payment's review up when it's still yours to answer —
+    /// the review sheet is where "Not received" lives, next to the proof,
+    /// which is why a Siri card sends people here for it.
+    private func openSettle(tripID: UUID?, settlementID: UUID?, for destination: AppNavigator.Destination) {
+        if let tripID, store.trip(tripID) == nil {
+            if store.state.isLoading { navigator.deferRequest(destination) }
+            return
+        }
+        selection = .settle
+
+        if let settlementID,
+           let settlement = store.trip(tripID)?.settlements.first(where: { $0.id == settlementID }),
+           settlement.isPending, settlement.youAreRecipient {
+            incomingSettlement = settlement
+        }
     }
 
     /// Quick add belongs to Home, because it belongs to a trip and Home is
@@ -356,6 +417,17 @@ struct RootTabView: View {
     private var liveTrip: Trip? {
         store.trips.first { $0.phase == .live }
     }
+
+    /// Puts the next waiting booking change in front of the person, unless
+    /// one already is or they've put it off.
+    private func promptNextChange() {
+        guard reviewingChange == nil,
+              let next = bookingChanges.waiting().first(where: { !snoozedChanges.contains($0.id) })
+        else { return }
+        reviewingChange = ReviewRequest(id: next.id)
+    }
+
+    struct ReviewRequest: Identifiable { let id: String }
 }
 
 #Preview {

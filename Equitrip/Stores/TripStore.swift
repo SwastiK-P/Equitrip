@@ -117,7 +117,10 @@ final class TripStore {
     /// screens have an empty state that says so. Only a thrown error becomes
     /// `.failed`, and it keeps whatever is already on screen rather than
     /// blanking it, so a dropped connection mid-session doesn't wipe the view.
-    func sync() async {
+    ///
+    /// Siri passes `includeInvitations: false`: nothing it answers reads them,
+    /// and a cold launch behind a spoken question has no round trip to spare.
+    func sync(includeInvitations: Bool = true) async {
         if trips.isEmpty { state = .loading }
 
         do {
@@ -134,7 +137,9 @@ final class TripStore {
 
             // After the trips, and never allowed to fail the sync: an
             // invitation that doesn't load costs you a card, not your trips.
-            invitations = await SupabaseRepository.shared.loadInvitations()
+            if includeInvitations {
+                invitations = await SupabaseRepository.shared.loadInvitations()
+            }
 
             if selectedTripID == nil || !trips.contains(where: { $0.id == selectedTripID }) {
                 selectedTripID = currentTrip?.id ?? trips.first?.id
@@ -267,7 +272,10 @@ final class TripStore {
         write { try await SupabaseRepository.shared.updateTrip(updated, from: before) }
     }
 
-    func updateItem(_ item: ItineraryItem, in tripID: UUID) {
+    /// `notice`, when given, is what the group is told instead of the usual
+    /// "Swastik changed …" — a change applied from an airline's email says
+    /// the airline moved it, which is the fact the group needs.
+    func updateItem(_ item: ItineraryItem, in tripID: UUID, notice: BookingNotice? = nil) {
         guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
               let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == item.id })
         else { return }
@@ -278,7 +286,11 @@ final class TripStore {
         // Announced from the *updated* trip: a payment notification quotes
         // each person's share, and the share is computed from the booking as
         // it now stands, not as it was a line ago.
-        notifier?.announceBookingChanged(from: before, to: item, in: trips[tripIndex])
+        if let notice {
+            notifier?.announce(notice, about: item.id, in: trips[tripIndex])
+        } else {
+            notifier?.announceBookingChanged(from: before, to: item, in: trips[tripIndex])
+        }
         auditor?.expenseChanged(from: before, to: item, in: trips[tripIndex])
 
         write { try await SupabaseRepository.shared.upsertItem(item, tripID: tripID) }
@@ -337,14 +349,18 @@ final class TripStore {
         }
     }
 
-    func removeItem(_ itemID: UUID, in tripID: UUID) {
+    func removeItem(_ itemID: UUID, in tripID: UUID, notice: BookingNotice? = nil) {
         guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
               let removed = trips[tripIndex].items.first(where: { $0.id == itemID })
         else { return }
 
         let before = trips[tripIndex]
         trips[tripIndex].items.removeAll { $0.id == itemID }
-        notifier?.announceBookingRemoved(removed, from: trips[tripIndex])
+        if let notice {
+            notifier?.announce(notice, about: nil, in: trips[tripIndex], removed: true)
+        } else {
+            notifier?.announceBookingRemoved(removed, from: trips[tripIndex])
+        }
         auditor?.expenseRemoved(removed, from: before)
 
         write { try await SupabaseRepository.shared.deleteItem(itemID) }
@@ -408,14 +424,24 @@ final class TripStore {
     /// Runs a write in the background and keeps whatever went wrong, so the
     /// screens can say so instead of the change quietly not existing.
     private func write(_ body: @escaping () async throws -> Void) {
-        let id = UUID()
-        inFlight[id] = Task {
+        track {
             do {
                 try await body()
-                writeFailure = nil
+                self.writeFailure = nil
             } catch {
-                writeFailure = AuthService.message(for: error)
+                self.writeFailure = AuthService.message(for: error)
             }
+        }
+    }
+
+    /// Runs work that handles its own failure — a settlement rolling itself
+    /// back — where `settleWrites` can still wait for it. The settlement writes
+    /// used to be bare tasks, so a Siri or watch "confirmed" was said before
+    /// the server had answered, and stayed said when it then rolled back.
+    private func track(_ body: @escaping () async -> Void) {
+        let id = UUID()
+        inFlight[id] = Task {
+            await body()
             inFlight[id] = nil
         }
     }
@@ -560,7 +586,7 @@ final class TripStore {
         let payer = Traveller.you.name
         let each = Money.format(amount, code: trip.currencyCode)
 
-        Task {
+        track { [self] in
             do {
                 try await SupabaseRepository.shared.createSettlement(settlement)
                 writeFailure = nil
@@ -600,7 +626,7 @@ final class TripStore {
         let responder = Traveller.you.name
         let each = Money.format(settlement.amount, code: settlement.currencyCode)
 
-        Task {
+        track { [self] in
             do {
                 try await SupabaseRepository.shared.respondToSettlement(
                     settlement.id, status: status, respondedBy: Traveller.you.id
@@ -647,7 +673,7 @@ final class TripStore {
         let trip = trips[tripIndex]
         trips[tripIndex].settlements.removeAll { $0.id == settlement.id }
 
-        Task {
+        track { [self] in
             do {
                 try await SupabaseRepository.shared.withdrawSettlement(settlement.id)
                 auditor?.settlementWithdrawn(settlement, in: trip)

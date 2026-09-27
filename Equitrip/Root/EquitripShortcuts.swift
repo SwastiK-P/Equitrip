@@ -19,35 +19,47 @@ import AppIntents
 /// trip's chat — aren't listed here and don't need to be: Apple Intelligence
 /// matches those by meaning. These are the actions only this app has, so they
 /// need their words spelled out. The system allows ten; phrases that name a
-/// trip are refreshed from `SpotlightIndex` whenever the trips change, which
-/// is what teaches Siri that "Goa" is a trip.
+/// trip are refreshed from `SpotlightIndex` whenever the trip names change,
+/// which is what teaches Siri that "Goa" is a trip.
 ///
 /// Every phrase has to contain the app name token, or it's silently dropped.
 struct EquitripShortcuts: AppShortcutsProvider {
+    // Most-used first: the order is what Spotlight and the Shortcuts app show
+    // until they've learned what this person actually reaches for. Phrases
+    // are short and plain on purpose — the first set had sentences like
+    // "Where do I stand in Equitrip", which nobody says, so nobody's words
+    // matched them.
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: LogExpenseIntent(),
             phrases: [
                 "Log an expense in \(.applicationName)",
+                "Add an expense in \(.applicationName)",
                 "Add an expense to \(.applicationName)",
-                "Log a payment in \(.applicationName)",
+                "New \(.applicationName) expense",
                 "Split a bill in \(.applicationName)",
-                "Log an expense on \(\.$trip) in \(.applicationName)"
+                "Log a payment in \(.applicationName)",
+                "Log an expense on \(\.$trip) in \(.applicationName)",
+                "Add an expense to \(\.$trip) in \(.applicationName)"
             ],
             shortTitle: "Log Expense",
-            systemImageName: "indianrupeesign.circle"
+            systemImageName: "plus.circle.fill"
         )
 
         AppShortcut(
             intent: TripBalanceIntent(),
             phrases: [
-                "Where do I stand in \(.applicationName)",
                 "What do I owe in \(.applicationName)",
                 "Who owes me in \(.applicationName)",
-                "Where do I stand on \(\.$trip) in \(.applicationName)",
-                "What do I owe on \(\.$trip) in \(.applicationName)"
+                "Check my balance in \(.applicationName)",
+                "Show my \(.applicationName) balance",
+                "\(.applicationName) balance",
+                "Settle up in \(.applicationName)",
+                "Where do I stand in \(.applicationName)",
+                "What do I owe on \(\.$trip) in \(.applicationName)",
+                "Show my balance for \(\.$trip) in \(.applicationName)"
             ],
-            shortTitle: "My Balance",
+            shortTitle: "Balance",
             systemImageName: "arrow.left.arrow.right"
         )
 
@@ -56,19 +68,48 @@ struct EquitripShortcuts: AppShortcutsProvider {
             phrases: [
                 "What's next in \(.applicationName)",
                 "What's next on my trip in \(.applicationName)",
-                "What's next on \(\.$trip) in \(.applicationName)",
-                "What's the plan in \(.applicationName)"
+                "What's on today in \(.applicationName)",
+                "Show my plan in \(.applicationName)",
+                "What's my next booking in \(.applicationName)",
+                "What's next on \(\.$trip) in \(.applicationName)"
             ],
             shortTitle: "What's Next",
             systemImageName: "calendar.day.timeline.left"
         )
 
         AppShortcut(
+            intent: PaymentsWaitingIntent(),
+            phrases: [
+                "Check payments in \(.applicationName)",
+                "Did anyone pay me in \(.applicationName)",
+                "Confirm payments in \(.applicationName)",
+                "Who paid me in \(.applicationName)"
+            ],
+            shortTitle: "Check Payments",
+            systemImageName: "checkmark.seal"
+        )
+
+        AppShortcut(
+            intent: TripCountdownIntent(),
+            phrases: [
+                "How long until my trip in \(.applicationName)",
+                "Trip countdown in \(.applicationName)",
+                "\(.applicationName) countdown",
+                "How long until \(\.$trip) in \(.applicationName)",
+                "Countdown to \(\.$trip) in \(.applicationName)"
+            ],
+            shortTitle: "Countdown",
+            systemImageName: "hourglass"
+        )
+
+        // A shortcut phrase can't carry a free-form question, so Siri asks
+        // for it after — "Ask Equitrip who paid for the villa" is two turns.
+        AppShortcut(
             intent: AskEquiQuestionIntent(),
             phrases: [
-                "Ask \(.applicationName) a question",
+                "Ask \(.applicationName)",
                 "Ask Equi in \(.applicationName)",
-                "Ask \(.applicationName)"
+                "Ask \(.applicationName) a question"
             ],
             shortTitle: "Ask Equi",
             // Siri and Spotlight take a system name only, so the app's own
@@ -107,7 +148,7 @@ struct EquitripShortcuts: AppShortcutsProvider {
                 "Type an expense in \(.applicationName)"
             ],
             shortTitle: "Quick Add",
-            systemImageName: "plus.circle.fill"
+            systemImageName: "square.and.pencil"
         )
     }
 }

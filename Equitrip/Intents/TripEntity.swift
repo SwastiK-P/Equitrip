@@ -87,7 +87,7 @@ struct TripEntity: nonisolated Identifiable, nonisolated IndexedEntity, nonisola
 nonisolated struct TripEntityQuery: EntityStringQuery, IndexedEntityQuery {
 
     func entities(for identifiers: [TripEntity.ID]) async throws -> [TripEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             identifiers.compactMap { store.trip($0) }.map(TripEntity.init)
         }
@@ -96,7 +96,7 @@ nonisolated struct TripEntityQuery: EntityStringQuery, IndexedEntityQuery {
     /// Matched on the words a person actually uses for a trip: its title, or
     /// where it's going. The framework does no filtering of its own here.
     func entities(matching string: String) async throws -> [TripEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             TripMatcher.trips(matching: string, in: store.trips).map(TripEntity.init)
         }
@@ -105,7 +105,7 @@ nonisolated struct TripEntityQuery: EntityStringQuery, IndexedEntityQuery {
     /// What a picker offers first: the trip under way, then what's next, then
     /// the rest newest first — the order a person reaches for them in.
     func suggestedEntities() async throws -> [TripEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             TripMatcher.byRelevance(store.trips).prefix(12).map(TripEntity.init)
         }

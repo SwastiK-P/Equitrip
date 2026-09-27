@@ -168,7 +168,7 @@ struct BookingEntity: nonisolated Identifiable, nonisolated IndexedEntity, nonis
 nonisolated struct BookingEntityQuery: EntityStringQuery, IndexedEntityQuery {
 
     func entities(for identifiers: [BookingEntity.ID]) async throws -> [BookingEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             let wanted = Set(identifiers)
             return store.trips.flatMap { trip in
@@ -178,7 +178,7 @@ nonisolated struct BookingEntityQuery: EntityStringQuery, IndexedEntityQuery {
     }
 
     func entities(matching string: String) async throws -> [BookingEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             TripMatcher.bookings(matching: string, in: store.trips)
                 .prefix(20)
@@ -189,7 +189,7 @@ nonisolated struct BookingEntityQuery: EntityStringQuery, IndexedEntityQuery {
     /// What's coming up soonest on the trips still ahead — the bookings a
     /// person is likeliest to be asking about.
     func suggestedEntities() async throws -> [BookingEntity] {
-        let store = try await IntentStores.store()
+        let store = try await IntentStores.store(fresh: false)
         return await MainActor.run {
             let now = Date().addingTimeInterval(-3 * 3600)
             return store.trips

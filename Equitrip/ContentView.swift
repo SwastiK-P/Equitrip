@@ -22,8 +22,6 @@ struct ContentView: View {
         ZStack {
             switch route {
             case .launching:
-                // Held until the persisted session check finishes, so a
-                // signed-in user never sees onboarding flash past.
                 ZStack {
                     CanvasBackground()
                     ProgressView().tint(AppTheme.inkTertiary)

@@ -160,8 +160,6 @@ struct JoinTripFlow: View {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.86)) { stage = .scanning }
                 } label: {
                     HStack(spacing: 7) {
-                        Image(systemName: "qrcode.viewfinder")
-                            .font(.system(size: 15, weight: .semibold))
                         Text("Scan QR code")
                             .font(.system(size: 16, weight: .semibold))
                     }

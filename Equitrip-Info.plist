@@ -2,6 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>NSAppIconActionTintColorName</key>
+			<string>ShortcutsPlatterTint</string>
+			<key>NSAppIconComplementingColorNames</key>
+			<array>
+				<string>ShortcutsPlatterTop</string>
+				<string>ShortcutsPlatterBottom</string>
+			</array>
+		</dict>
+	</dict>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -23,6 +36,15 @@
 			<array>
 				<string>com.googleusercontent.apps.1051629329168-1h41i6fme8gffggfpiirh6u1dh5j8v91</string>
 			</array>
+		</dict>
+	</array>
+	<key>INAlternativeAppNames</key>
+	<array>
+		<dict>
+			<key>INAlternativeAppName</key>
+			<string>Equi Trip</string>
+			<key>INAlternativeAppNamePronunciationHint</key>
+			<string>eh-kwee trip</string>
 		</dict>
 	</array>
 	<key>NSUserActivityTypes</key>
