@@ -25,6 +25,9 @@ struct ItineraryItemEditor: View {
     @State private var confirmingDelete = false
 
     let travellers: [Traveller]
+    /// Who "Organiser pays" lands on. A trip can have several, and the ledger
+    /// divides the cost across all of them — the preview has to say the same.
+    let organiserIDs: Set<UUID>
     let currencyCode: String
     var isNew: Bool = false
     var onSave: (ItineraryItem) -> Void
@@ -33,6 +36,7 @@ struct ItineraryItemEditor: View {
     init(
         item: ItineraryItem,
         travellers: [Traveller],
+        organiserIDs: Set<UUID>,
         currencyCode: String,
         isNew: Bool = false,
         onSave: @escaping (ItineraryItem) -> Void,
@@ -43,6 +47,7 @@ struct ItineraryItemEditor: View {
         _hasTime = State(initialValue: item.time != nil)
         _flightNumberText = State(initialValue: item.flight?.number ?? "")
         self.travellers = travellers
+        self.organiserIDs = organiserIDs
         self.currencyCode = currencyCode
         self.isNew = isNew
         self.onSave = onSave
@@ -80,6 +85,7 @@ struct ItineraryItemEditor: View {
                         text: $draft.title,
                         symbol: draft.kind.symbol
                     )
+                    .agentField("editor.title", text: $draft.title)
 
                     GlassField(
                         label: "Vendor",
@@ -87,6 +93,7 @@ struct ItineraryItemEditor: View {
                         text: $draft.vendor,
                         symbol: "building.2"
                     )
+                    .agentField("editor.vendor", text: $draft.vendor)
 
                     GlassField(
                         label: "Cost (\(currencyCode))",
@@ -102,6 +109,10 @@ struct ItineraryItemEditor: View {
 
                 if draft.kind == .flight {
                     flightSection
+                }
+
+                if draft.kind == .train {
+                    TrainTrackingSection(item: $draft)
                 }
 
                 splitPicker
@@ -201,6 +212,7 @@ struct ItineraryItemEditor: View {
 
             CircleGlyphButton(symbol: "xmark", size: 34) { dismiss() }
                 .accessibilityLabel("Close")
+                .agentTarget("editor.close") { dismiss() }
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
@@ -281,12 +293,14 @@ struct ItineraryItemEditor: View {
                 DatePicker("Day", selection: $draft.date, displayedComponents: .date)
                     .padding(.horizontal, 14)
                     .frame(height: 52)
+                    .agentDate("editor.day") { draft.date = $0 }
 
                 Hairline(inset: 14)
 
                 Toggle("Has a set time", isOn: $hasTime)
                     .padding(.horizontal, 14)
                     .frame(height: 52)
+                    .agentTarget("editor.hasTime") { hasTime = true }
 
                 if hasTime {
                     Hairline(inset: 14)
@@ -301,6 +315,7 @@ struct ItineraryItemEditor: View {
                     )
                     .padding(.horizontal, 14)
                     .frame(height: 52)
+                    .agentDate("editor.time") { draft.time = $0 }
                 }
             }
             .font(.system(size: 15))
@@ -308,7 +323,13 @@ struct ItineraryItemEditor: View {
             .panelSurface(corner: 18)
             .animation(.spring(response: 0.32, dampingFraction: 0.85), value: hasTime)
             .onChange(of: hasTime) { _, on in
-                draft.time = on ? .at(9, 0, on: draft.date) : nil
+                // A time already set (by Equi, just before switching this
+                // on) is kept rather than reset to nine.
+                if !on {
+                    draft.time = nil
+                } else if draft.time == nil {
+                    draft.time = .at(9, 0, on: draft.date)
+                }
             }
             .onChange(of: draft.date) { _, day in
                 // Keep the time on the day it belongs to when the day moves.
@@ -815,7 +836,9 @@ struct ItineraryItemEditor: View {
 
             ParticipantSummaryRow(
                 travellers: chosenTravellers,
-                shareEach: shareEach,
+                // "Each" beside these faces is only true when they're the
+                // ones paying — not under organiser or one-person rules.
+                shareEach: bearers.map(\.id) == chosenTravellers.map(\.id) ? shareEach : nil,
                 currencyCode: currencyCode
             ) {
                 showParticipants = true
@@ -847,7 +870,10 @@ struct ItineraryItemEditor: View {
             return chosenTravellers
         case .custom:
             return chosenTravellers.filter { (draft.customShares[$0.id] ?? 0) > 0 }
-        case .organiser, .individual:
+        case .organiser:
+            let organisers = travellers.filter { organiserIDs.contains($0.id) }
+            return organisers.isEmpty ? travellers : organisers
+        case .individual:
             return chosenTravellers.isEmpty ? [] : [chosenTravellers[0]]
         }
     }
@@ -932,8 +958,13 @@ struct ItineraryItemEditor: View {
         switch draft.split {
         case .custom:
             return nil
-        case .organiser, .individual:
+        case .individual:
             return "\(draft.split.label) — nobody else is charged for this."
+        case .organiser where bearers.count == 1:
+            return "\(draft.split.label) — nobody else is charged for this."
+        case .organiser:
+            guard let each = shareEach else { return nil }
+            return "\(Money.format(each, code: currencyCode)) each, across the \(bearers.count) organisers — nobody else is charged."
         default:
             guard let each = shareEach, !bearers.isEmpty else { return nil }
             let heads = bearers.count
@@ -959,60 +990,7 @@ struct ItineraryItemEditor: View {
     }
 
     private var saveBar: some View {
-        Button {
-            draft.cost = max(0, Double(costText) ?? 0)
-            draft.title = draft.title.trimmingCharacters(in: .whitespaces)
-            draft.vendor = draft.vendor.trimmingCharacters(in: .whitespaces)
-
-            // Amounts typed under "exact" and then abandoned for another mode
-            // would otherwise sit in the row waiting to reappear the next time
-            // somebody picks it, describing a cost that has since changed.
-            if !draft.split.isCustom {
-                draft.customShares = [:]
-            } else {
-                // Spelled out first. "Clear" in the participant picker leaves
-                // the set empty, which means everyone: the amounts were shown,
-                // typed and checked against everyone, and filtering them by
-                // the empty set threw every one away — leaving a paid booking
-                // that nobody owed anything on. The amounts are also stored on
-                // the participant rows, so an empty set couldn't keep them.
-                draft.participantIDs = Set(chosenTravellers.map(\.id))
-                draft.customShares = draft.customShares.filter { draft.participantIDs.contains($0.key) }
-            }
-
-            let trimmedFlightNumber = flightNumberText.trimmingCharacters(in: .whitespaces)
-            if draft.kind == .flight, !trimmedFlightNumber.isEmpty {
-                // Keep whatever a lookup already resolved for this exact
-                // number; a hand-edited number invalidates that lookup rather
-                // than carrying stale route/time data forward under it.
-                if draft.flight?.number != trimmedFlightNumber {
-                    draft.flight = FlightDetails(number: trimmedFlightNumber)
-                }
-            } else if draft.kind != .flight {
-                draft.flight = nil
-            }
-
-            // Fire-and-forget: the glyph is a nicety, so it resolves after the
-            // booking is already saved rather than making the user wait on it.
-            let saved = draft
-            onSave(saved)
-            GlassToastCenter.shared.show(.init(
-                symbol: "checkmark.circle.fill",
-                tint: AppTheme.positive,
-                title: isNew ? "Booking added" : "Booking updated",
-                subtitle: "\"\(saved.title)\" is saved.",
-                duration: .seconds(3)
-            ))
-            Task {
-                if let symbol = await ActivityIconSuggester.symbol(for: saved.title, kind: saved.kind),
-                   symbol != saved.suggestedSymbol {
-                    var updated = saved
-                    updated.suggestedSymbol = symbol
-                    onSave(updated)
-                }
-            }
-            dismiss()
-        } label: {
+        Button(action: save) {
             Text(isNew ? "Add booking" : "Save changes")
                 .font(.system(size: 16, weight: .semibold))
                 .frame(maxWidth: .infinity)
@@ -1022,8 +1000,64 @@ struct ItineraryItemEditor: View {
         .tint(AppTheme.accent)
         .disabled(!canSave)
         .opacity(canSave ? 1 : 0.5)
+        .agentTarget("editor.save") { if canSave { save() } }
         .padding(.horizontal, 20)
         .padding(.bottom, 8)
+    }
+
+    private func save() {
+        draft.cost = max(0, Double(costText) ?? 0)
+        draft.title = draft.title.trimmingCharacters(in: .whitespaces)
+        draft.vendor = draft.vendor.trimmingCharacters(in: .whitespaces)
+
+        // Amounts typed under "exact" and then abandoned for another mode
+        // would otherwise sit in the row waiting to reappear the next time
+        // somebody picks it, describing a cost that has since changed.
+        if !draft.split.isCustom {
+            draft.customShares = [:]
+        } else {
+            // Spelled out first. "Clear" in the participant picker leaves
+            // the set empty, which means everyone: the amounts were shown,
+            // typed and checked against everyone, and filtering them by
+            // the empty set threw every one away — leaving a paid booking
+            // that nobody owed anything on. The amounts are also stored on
+            // the participant rows, so an empty set couldn't keep them.
+            draft.participantIDs = Set(chosenTravellers.map(\.id))
+            draft.customShares = draft.customShares.filter { draft.participantIDs.contains($0.key) }
+        }
+
+        let trimmedFlightNumber = flightNumberText.trimmingCharacters(in: .whitespaces)
+        if draft.kind == .flight, !trimmedFlightNumber.isEmpty {
+            // Keep whatever a lookup already resolved for this exact
+            // number; a hand-edited number invalidates that lookup rather
+            // than carrying stale route/time data forward under it.
+            if draft.flight?.number != trimmedFlightNumber {
+                draft.flight = FlightDetails(number: trimmedFlightNumber)
+            }
+        } else if draft.kind != .flight {
+            draft.flight = nil
+        }
+
+        // Fire-and-forget: the glyph is a nicety, so it resolves after the
+        // booking is already saved rather than making the user wait on it.
+        let saved = draft
+        onSave(saved)
+        GlassToastCenter.shared.show(.init(
+            symbol: "checkmark.circle.fill",
+            tint: AppTheme.positive,
+            title: isNew ? "Booking added" : "Booking updated",
+            subtitle: "\"\(saved.title)\" is saved.",
+            duration: .seconds(3)
+        ))
+        Task {
+            if let symbol = await ActivityIconSuggester.symbol(for: saved.title, kind: saved.kind),
+               symbol != saved.suggestedSymbol {
+                var updated = saved
+                updated.suggestedSymbol = symbol
+                onSave(updated)
+            }
+        }
+        dismiss()
     }
 
     private func label(_ text: String) -> some View {

@@ -25,7 +25,7 @@ import SwiftUI
 /// as a proposal and only becomes fact when someone else agrees. Until then it
 /// affects nothing at all — `Trip.bearers(of:)` ignores anything that isn't
 /// `.confirmed`.
-struct TripDeparture: Identifiable, Hashable {
+struct TripDeparture: Identifiable, Hashable, Codable {
 
     enum Status: String, Codable, Hashable {
         case pending, confirmed, declined

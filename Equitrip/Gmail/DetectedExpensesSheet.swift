@@ -68,6 +68,7 @@ struct DetectedExpensesSheet: View {
         .sheet(item: $adding) { detection in
             QuickAddSheet(
                 travellers: trip.travellers,
+                organiserIDs: trip.organiserIDs,
                 currencyCode: detection.currencyCode,
                 day: Calendar.current.startOfDay(for: detection.receivedAt),
                 seed: seed(for: detection),

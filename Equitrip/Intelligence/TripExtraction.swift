@@ -169,6 +169,13 @@ final class TripExtractor {
         var days: [PlannedDay] = []
         var stage: Stage = .opening
         var isComplete = false
+        /// The Nugen model that read the days, when one did. Nil for Apple
+        /// Intelligence and for the pattern parser.
+        var nugenModel: String?
+        /// Days Nugen answered with low confidence. Its reading still stands
+        /// (it passed the same checks as any other), but the review screen
+        /// names these days as the ones to look over first.
+        var unsureDays: [Int] = []
 
         var items: [PlannedItem] { days.flatMap(\.items) }
         var itemCount: Int { days.reduce(0) { $0 + $1.items.count } }
@@ -210,7 +217,14 @@ final class TripExtractor {
     /// accuracy nobody got.
     private var daysReadByModel = 0
 
+    /// Whether this import will be read by a model at all: a chosen Nugen
+    /// model always can be (it isn't this device that runs it); otherwise it
+    /// comes down to Apple Intelligence.
     var availability: IntelligenceAvailability {
+        AppSettings.bookingReader.nugenModelID != nil ? .ready : appleAvailability
+    }
+
+    private var appleAvailability: IntelligenceAvailability {
         switch SystemLanguageModel.default.availability {
         case .available: .ready
         case .unavailable(.deviceNotEligible): .unsupportedDevice
@@ -230,6 +244,10 @@ final class TripExtractor {
     /// seconds — but a phone doing this on battery isn't a Mac, so the width is
     /// kept modest rather than "all of them".
     private static let readingWidth = 3
+
+    /// Below this Nugen confidence (0–100) a day is named on the review
+    /// screen as one to check.
+    private static let unsureBelow = 60.0
 
     // MARK: - Entry point
 
@@ -251,8 +269,16 @@ final class TripExtractor {
         seedFromDocument()
 
         let days = Array(document.days.prefix(Self.maxDays))
+        let reader = AppSettings.bookingReader
 
-        if availability.isReady {
+        if let model = reader.nugenModelID {
+            await readWithNugen(days, model: model)
+            if daysReadByModel == 0 {
+                usedFallback = true
+            } else {
+                progress.nugenModel = reader.label
+            }
+        } else if appleAvailability.isReady {
             await readWithModel(days)
             if daysReadByModel == 0 { usedFallback = true }
         } else {
@@ -306,7 +332,15 @@ final class TripExtractor {
     private func readWithModel(_ days: [ItineraryDocument.DaySection]) async {
         progress.stage = .understanding
         await readOverview()
+        await readConcurrently(days) { await $0.readDay($1) }
+    }
 
+    /// Runs `read` over the days a few at a time. Days are independent of
+    /// each other, so either model can overlap them.
+    private func readConcurrently(
+        _ days: [ItineraryDocument.DaySection],
+        read: @escaping @MainActor (TripExtractor, ItineraryDocument.DaySection) async -> [PlannedItem]
+    ) async {
         // Days are independent of each other — that's the whole point of having
         // split them — so they're read a few at a time rather than one after
         // another. They land out of order and get sorted at the end; on screen
@@ -324,7 +358,7 @@ final class TripExtractor {
                 next += 1
                 group.addTask { @MainActor [weak self] in
                     guard let self else { return }
-                    let items = await self.readDay(day)
+                    let items = await read(self, day)
                     self.append(
                         PlannedDay(
                             number: day.number,
@@ -448,15 +482,19 @@ final class TripExtractor {
 
     /// A partially generated entry is only worth showing once it has a title.
     private func settle(_ item: ExtractedItem.PartiallyGenerated, on day: ItineraryDocument.DaySection) -> PlannedItem? {
-        guard let title = item.title?.trimmingCharacters(in: .whitespacesAndNewlines), title.count >= 2
+        planned(title: item.title, time: item.time, kind: item.kind ?? .other, on: day)
+    }
+
+    /// One entry, from either model, as a booking on its day.
+    private func planned(title: String?, time: String?, kind: ExtractedKind, on day: ItineraryDocument.DaySection) -> PlannedItem? {
+        guard let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), title.count >= 2
         else { return nil }
 
-        let kind = item.kind ?? .other
         return PlannedItem(
             title: title,
             detail: "",
             day: day.date ?? Date(),
-            minuteOfDay: Self.minutes(from: item.time ?? ""),
+            minuteOfDay: Self.minutes(from: time ?? ""),
             // Reasoned as it arrives, not only at the end. The tidy-up pass
             // used to be the first thing to notice that an airport transfer
             // isn't a flight, which meant the live list showed the model's
@@ -579,6 +617,46 @@ final class TripExtractor {
     private static func minutes(from text: String) -> Int? {
         guard let parsed = TravelDate.time(in: text) else { return nil }
         return parsed.hour * 60 + parsed.minute
+    }
+
+    // MARK: - Nugen
+
+    /// The same day-at-a-time read, by the chosen Nugen aligned model.
+    ///
+    /// Nugen was aligned on days, not headers, so the header is what the
+    /// document parse already found (`seedFromDocument`) — the same as the
+    /// pattern path. Each day goes through the same `validate` as Apple
+    /// Intelligence's: the model names and sorts the rows, and every time and
+    /// price still comes from the row itself.
+    private func readWithNugen(_ days: [ItineraryDocument.DaySection], model: String) async {
+        progress.stage = .understanding
+        if progress.title.isEmpty {
+            progress.title = document.destinationHint.map(Self.cityOnly) ?? "Imported trip"
+        }
+        await readConcurrently(days) { await $0.readDayWithNugen($1, model: model) }
+        progress.unsureDays.sort()
+    }
+
+    private func readDayWithNugen(_ day: ItineraryDocument.DaySection, model: String) async -> [PlannedItem] {
+        guard !day.lines.isEmpty else { return [] }
+
+        do {
+            let reading = try await NugenService.readDay(dayPrompt(day), model: model)
+            let items = reading.items.prefix(min(day.lines.count, Self.maxItemsPerDay)).compactMap {
+                planned(title: $0.title, time: $0.time, kind: NugenService.kind($0.kind), on: day)
+            }
+            let checked = validate(Array(items), against: day)
+            guard !checked.isEmpty else { return StructuredRowParser.items(in: day) }
+            daysReadByModel += 1
+            if let confidence = reading.confidence, confidence < Self.unsureBelow {
+                progress.unsureDays.append(day.number)
+            }
+            return checked
+        } catch {
+            // Offline, or a reply that wasn't a list: this day by pattern,
+            // the rest still by Nugen.
+            return StructuredRowParser.items(in: day)
+        }
     }
 
     // MARK: - Fallback

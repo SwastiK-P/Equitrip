@@ -59,7 +59,7 @@ enum SplitMode: String, CaseIterable, Identifiable, Codable {
         case .equal: "Divided evenly across everyone on the trip, whether or not they're on this booking"
         case .participants: "Divided evenly, but only across the people named on this booking"
         case .custom: "You set what each person owes. The amounts have to add up to the cost"
-        case .organiser: "Carried by whoever is organising the trip, not shared out"
+        case .organiser: "Carried by the trip's organisers — divided between them if there's more than one"
         case .individual: "One named person carries the whole cost"
         }
     }

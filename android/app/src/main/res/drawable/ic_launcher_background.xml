@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The iOS icon's fill: Icon Composer's light gradient, top to bottom. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient android:angle="270" android:startColor="#4E86FF" android:endColor="#2F2A92" />
+</shape>

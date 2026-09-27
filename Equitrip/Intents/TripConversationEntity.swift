@@ -67,26 +67,31 @@ nonisolated struct TripConversationQuery: EntityStringQuery {
 
     func entities(for identifiers: [TripConversationEntity.ID]) async throws -> [TripConversationEntity] {
         let store = try await IntentStores.store(fresh: false)
-        return try await Self.conversations(for: identifiers, in: store)
+        return await Self.conversations(for: identifiers, in: store)
     }
 
     /// "The Goa group", "Rome chat" — matched on the trip it belongs to.
     func entities(matching string: String) async throws -> [TripConversationEntity] {
         let store = try await IntentStores.store(fresh: false)
         let ids = await MainActor.run { TripMatcher.trips(matching: string, in: store.trips).map(\.id) }
-        return try await Self.conversations(for: ids, in: store)
+        return await Self.conversations(for: ids, in: store)
     }
 
     func suggestedEntities() async throws -> [TripConversationEntity] {
         let store = try await IntentStores.store(fresh: false)
         let ids = await MainActor.run { TripMatcher.byRelevance(store.trips).prefix(10).map(\.id) }
-        return try await Self.conversations(for: Array(ids), in: store)
+        return await Self.conversations(for: Array(ids), in: store)
     }
 
+    /// The latest message is decoration on a conversation, not what makes it
+    /// one. Offline, the chats are still offered, without a preview, rather
+    /// than the lookup failing. Siri asks for these in the background to fill
+    /// "Open the … chat", and a thrown network error there crashed the app
+    /// (see `IntentStores.fromServer`).
     @MainActor
-    static func conversations(for tripIDs: [UUID], in store: TripStore) async throws -> [TripConversationEntity] {
+    static func conversations(for tripIDs: [UUID], in store: TripStore) async -> [TripConversationEntity] {
         let trips = tripIDs.compactMap { store.trip($0) }
-        let threads = try await ChatArchive.threads(for: trips.map(\.id))
+        let threads = (try? await ChatArchive.threads(for: trips.map(\.id))) ?? [:]
         return trips.map { TripConversationEntity($0, thread: threads[$0.id]) }
     }
 }

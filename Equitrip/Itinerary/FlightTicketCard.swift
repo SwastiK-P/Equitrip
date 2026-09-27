@@ -27,9 +27,9 @@ struct FlightTicketCard: View {
             perforation
             stub
         }
-        .background(AppTheme.card, in: TicketShape())
+        .background(AppTheme.card, in: NotchedTicketShape())
         .overlay {
-            TicketShape().stroke(AppTheme.cardStroke.opacity(0.06), lineWidth: 1)
+            NotchedTicketShape().stroke(AppTheme.cardStroke.opacity(0.06), lineWidth: 1)
         }
         .shadow(color: AppTheme.softShadow(.light), radius: 10, y: 4)
     }
@@ -226,8 +226,9 @@ private struct Line: Shape {
 }
 
 /// A rounded rectangle with a bite taken out of each side, where a real ticket
-/// would be torn. The notch sits on the perforation line.
-private struct TicketShape: Shape {
+/// would be torn. The notch sits on the perforation line. Shared with
+/// `TrainTicketCard`'s compact form.
+struct NotchedTicketShape: Shape {
     var corner: CGFloat = 20
     var notchRadius: CGFloat = 9
     /// Distance from the bottom to the tear — matches the stub's height.

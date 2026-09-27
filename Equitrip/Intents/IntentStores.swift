@@ -28,11 +28,38 @@ nonisolated enum IntentStores {
         }
         return store
     }
+
+    /// Runs a read that has to go to the server, and turns whatever it
+    /// throws into a failure Siri can say.
+    ///
+    /// Never let a raw network error out of an intent or an entity query.
+    /// The system carries the error back across a process boundary, and a real
+    /// `URLError` holds the `URLSessionTask` that failed, which can't be
+    /// encoded. The encoder throws, and the app aborts on the AppIntents queue.
+    /// That's what killed the app offline, seconds after launch, when Siri
+    /// asked for the chats to offer in "Open the … chat".
+    static func fromServer<Value>(
+        _ what: IntentFailure.Source,
+        _ body: () async throws -> Value
+    ) async throws -> Value {
+        do {
+            return try await body()
+        } catch let failure as IntentFailure {
+            throw failure
+        } catch {
+            let reason = await MainActor.run { AuthService.message(for: error) }
+            throw IntentFailure.unreachable(what, reason)
+        }
+    }
 }
 
 /// Failures an intent explains in its own words.
 nonisolated enum IntentFailure: Error, CustomLocalizedStringResourceConvertible {
+    /// What couldn't be reached, for `unreachable`.
+    enum Source { case chat }
+
     case couldNotLoad(String)
+    case unreachable(Source, String)
     case tripNotFound
     case bookingNotFound
     case noTrips
@@ -68,6 +95,7 @@ nonisolated enum IntentFailure: Error, CustomLocalizedStringResourceConvertible 
         case .cannotMoveTrips: "A booking can't move to a different trip. Remove it and add it to the other one."
         case .cannotMarkUnread: "Equitrip can't mark a chat as unread."
         case .couldNotLoad(let reason): "Couldn't reach your trips. \(reason)"
+        case .unreachable(.chat, let reason): "Couldn't reach the trip chat. \(reason)"
         case .tripNotFound: "That trip isn't in Equitrip any more."
         case .bookingNotFound: "That booking isn't on the trip any more."
         case .noTrips: "You're not on any trips yet. Start one in Equitrip."

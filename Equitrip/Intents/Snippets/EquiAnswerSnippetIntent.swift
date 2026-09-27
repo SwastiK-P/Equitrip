@@ -20,31 +20,34 @@ struct EquiAnswerSnippetIntent: SnippetIntent {
 
     static let title: LocalizedStringResource = "Equi Answer Card"
 
-    /// `EquiCardKind.storageKey`, the same name a saved transcript uses.
+    /// `EquiCard.storageKey`, the same string a saved transcript uses — the
+    /// kind plus what it's narrowed to.
     @Parameter(title: "Card") var kind: String
     @Parameter(title: "Trip") var tripID: String
 
     init() {}
 
     init(card: EquiCard?) {
-        kind = card?.kind.storageKey ?? EquiCardKind.text.storageKey
-        tripID = card?.tripID.uuidString ?? ""
+        kind = card?.storageKey ?? "text"
+        tripID = card?.tripID?.uuidString ?? ""
     }
 
     @MainActor
     func perform() async throws -> some IntentResult & ShowsSnippetView {
-        guard let id = UUID(uuidString: tripID), let kind = EquiCardKind(storageKey: kind) else {
+        guard let card = EquiCard(storageKey: kind, tripID: UUID(uuidString: tripID)) else {
             return .result(view: EquiAnswerSnippetView(content: .none))
         }
         let store = try await IntentStores.store(fresh: false)
-        guard let trip = store.trip(id) else { return .result(view: EquiAnswerSnippetView(content: .none)) }
+        guard card.kind != .trips else { return .result(view: EquiAnswerSnippetView(content: .card(card, store))) }
+        guard let trip = store.trip(card.tripID) else { return .result(view: EquiAnswerSnippetView(content: .none)) }
 
-        let content: EquiAnswerSnippetView.Content = switch kind {
-        case .balance: .balance(await BalanceSnippetModel.make(for: trip))
-        case .itinerary: .upNext(await UpNextSnippetModel.make(for: trip))
+        // Siri's own cards where they answer the same question; Equi's where
+        // the answer was narrowed to something Siri's cards don't show.
+        let content: EquiAnswerSnippetView.Content = switch card.kind {
+        case .balance where card.personID == nil: .balance(await BalanceSnippetModel.make(for: trip))
+        case .itinerary where card.day == nil: .upNext(await UpNextSnippetModel.make(for: trip))
         case .trip: .trip(await TripStatusModel.make(for: trip))
-        case .spending, .people: .card(EquiCard(kind: kind, tripID: id), store)
-        case .text: .none
+        default: .card(card, store)
         }
         return .result(view: EquiAnswerSnippetView(content: content))
     }

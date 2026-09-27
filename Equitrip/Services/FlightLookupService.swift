@@ -155,12 +155,12 @@ private struct AviationStackResponse: Decodable {
                 airlineName: airline?.name,
                 departureAirport: departure?.iata,
                 departureAirportName: departure?.airport,
-                departureCity: departure?.timezone.flatMap(Self.city),
+                departureCity: departure?.timezone.flatMap { Self.city($0, airport: departure?.airport) },
                 departureTerminal: departure?.terminal,
                 departureGate: departure?.gate,
                 arrivalAirport: arrival?.iata,
                 arrivalAirportName: arrival?.airport,
-                arrivalCity: arrival?.timezone.flatMap(Self.city),
+                arrivalCity: arrival?.timezone.flatMap { Self.city($0, airport: arrival?.airport) },
                 arrivalTerminal: arrival?.terminal,
                 scheduledDeparture: Self.moveTimeOfDay(rawDeparture, onto: bookingDate),
                 // An overnight flight lands the day after it leaves; keep that
@@ -199,9 +199,15 @@ private struct AviationStackResponse: Decodable {
         /// The API gives no city field, but the IANA timezone carries one —
         /// "Asia/Kolkata" → "Kolkata" is close enough to be useful under an
         /// airport code, and it's the only city signal on offer.
-        private static func city(_ timezone: String) -> String? {
-            timezone.split(separator: "/").last
-                .map { $0.replacingOccurrences(of: "_", with: " ") }
+        /// The time zone's city, but only where it can be the airport's own:
+        /// a zone covers a whole country or region (every Indian airport is
+        /// `Asia/Kolkata`), so a zone city is trusted only when the airport's
+        /// name mentions it. Otherwise nil, and callers fall back to the name.
+        private static func city(_ timezone: String, airport: String?) -> String? {
+            guard let city = timezone.split(separator: "/").last
+                .map({ $0.replacingOccurrences(of: "_", with: " ") }),
+                  let airport, airport.localizedCaseInsensitiveContains(city) else { return nil }
+            return city
         }
 
         private static func parse(_ text: String?) -> Date? {

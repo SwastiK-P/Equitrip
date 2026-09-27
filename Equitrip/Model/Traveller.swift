@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-struct Traveller: Identifiable, Hashable {
+struct Traveller: Identifiable, Hashable, Codable {
     let id: UUID
     let name: String
     let asset: String

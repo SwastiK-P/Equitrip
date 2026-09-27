@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Equi's face: the glyph from the iOS `Equi.symbolset`, centred on a square viewport. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="640"
+    android:viewportHeight="640">
+    <group android:translateX="-482.5" android:translateY="-210.5">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M 538.05 337.43 H 653.29 Q 665.33 337.43 665.33 349.47 V 561.03 Q 665.33 573.07 653.29 573.07 H 538.05 Q 526.01 573.07 526.01 561.03 V 349.47 Q 526.01 337.43 538.05 337.43 Z M 952.57 337.43 H 1066.95 Q 1078.99 337.43 1078.99 349.47 V 561.03 Q 1078.99 573.07 1066.95 573.07 H 952.57 Q 940.53 573.07 940.53 561.03 V 349.47 Q 940.53 337.43 952.57 337.43 Z M 704.03 630.69 H 733.27 Q 745.31 630.69 745.31 642.73 V 668.53 H 860.55 V 642.73 Q 860.55 630.69 872.59 630.69 H 901.83 Q 913.87 630.69 913.87 642.73 V 668.53 Q 913.87 680.57 901.83 680.57 H 876.89 V 715.83 Q 876.89 723.57 869.15 723.57 H 736.71 Q 728.97 723.57 728.97 715.83 V 680.57 H 703.17 Q 691.13 680.57 691.13 668.53 V 642.73 Q 691.13 630.69 704.03 630.69 Z" />
+    </group>
+</vector>

@@ -470,7 +470,10 @@ struct TripPlaceCard: View {
 
             if trip.youAreOrganiser, let onDelete {
                 Divider()
+                // The app-wide purple tint wins over `.destructive` for menu
+                // icons, so the trash glyph gets its own tint to match the label.
                 Button("Delete trip", systemImage: "trash", role: .destructive) { onDelete() }
+                    .tint(AppTheme.danger)
             }
         } label: {
             Image(systemName: "ellipsis")

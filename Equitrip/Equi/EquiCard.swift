@@ -6,113 +6,170 @@
 import SwiftUI
 import FoundationModels
 
-// MARK: - What the model chooses
+// MARK: - What gets drawn
 
 /// The shapes Equi can answer *in*, beyond a paragraph of prose.
 ///
-/// The model picks one of these by name and nothing else — it never fills in
-/// the contents. That separation is the whole design: a small on-device model
-/// asked to restate a balance will eventually restate it wrong, so the card is
-/// drawn live from `TripStore` at render time and the model's only job is
-/// deciding which view of the trip answers the question. It cannot get a
-/// number wrong that it never touches.
-@Generable
+/// Chosen by Swift from the question (`EquiFacts`), not by the model: the
+/// first Equi let the model pick, and it picked the same handful of cards
+/// whatever was asked. The card's contents are still drawn live from
+/// `TripStore` at render time, so a figure on a card is never one the model
+/// restated — and never a stale one on a card scrolled back to next week.
 enum EquiCardKind: Hashable {
-    /// Talk, no card. Most questions land here.
-    case text
     /// The trip itself: cover, dates, who's on it, where you stand.
     case trip
+    /// A finished trip, told as its totals.
+    case recap
     /// Money: your net position and the transfers that would clear it.
     case balance
-    /// What's coming up next on the plan.
+    /// What's on the plan — next up, or one day of it.
     case itinerary
+    /// Every booking of one kind: the stays, the flights.
+    case bookings
     /// Where the money is going, broken down by category.
     case spending
     /// Everyone on the trip and what each of them is carrying.
     case people
+    /// Several trips side by side.
+    case trips
+    /// What's missing from the plan.
+    case gaps
 }
 
-/// One answer from Equi: what to say, and what to draw underneath it.
+/// A card under one of Equi's replies, and what it's narrowed to.
 ///
-/// Field order is load-bearing. The model generates properties in declaration
-/// order, so `reply` first means the text starts streaming immediately, and
-/// `card` last means the card only appears once `tripTitle` has already
-/// resolved — otherwise a card would flash up against a fallback trip and
-/// then swap out from under the reader.
-@Generable
-struct EquiAnswer {
-    @Guide(description: "Your reply, in one or two friendly sentences. When a card is shown, do not repeat the figures it already displays — introduce it instead.")
-    var reply: String
-
-    @Guide(description: "The exact title of the trip the answer is about, copied from the briefing. Empty string when no card is shown.")
-    var tripTitle: String
-
-    @Guide(description: "Which card to draw under the reply. Use 'text' unless a card genuinely answers the question better than a sentence would.")
-    var card: EquiCardKind
-}
-
-/// A card the model asked for, bound to a real trip.
+/// The narrowing is what makes a card answer the question that was asked:
+/// "how much on food?" draws the spending card with food picked out, "what's
+/// on tomorrow?" the plan for tomorrow, "what does Ed owe?" the balance with
+/// Ed's transfers first.
 struct EquiCard: Equatable {
-    let kind: EquiCardKind
-    let tripID: UUID
+    /// Which figure a row of `.trips` leads with.
+    enum Metric: String, Equatable {
+        case cost, balance
+    }
+
+    /// Which trips a `.trips` card lists, read live — a new trip shows up on
+    /// an old "my trips" card.
+    enum TripSet: String, Equatable {
+        case all, past, upcoming
+    }
+
+    var kind: EquiCardKind
+    /// The trip the card is about. Nil only for `.trips`.
+    var tripID: UUID?
+    var category: ItineraryKind?
+    var personID: UUID?
+    var day: Date?
+    var tripSet: TripSet?
+    /// Named trips being compared, when the question picked them out.
+    var tripIDs: [UUID] = []
+    var metric: Metric?
 }
 
 extension EquiCardKind {
-    /// The name this choice is stored under in `equi_messages.card_kind`.
+    /// The name this kind is stored under in `equi_messages.card_kind`.
     ///
-    /// Spelled out rather than taken from a `RawRepresentable` conformance:
-    /// `@Generable` synthesises its own machinery over this enum, and a stored
-    /// transcript must not change meaning because a case was renamed or
-    /// reordered to read better in the model's briefing.
+    /// Spelled out rather than derived from the case name: a stored transcript
+    /// must not change meaning because a case was renamed to read better.
     var storageKey: String {
         switch self {
-        case .text: "text"
         case .trip: "trip"
+        case .recap: "recap"
         case .balance: "balance"
         case .itinerary: "itinerary"
+        case .bookings: "bookings"
         case .spending: "spending"
         case .people: "people"
+        case .trips: "trips"
+        case .gaps: "gaps"
         }
     }
 
     init?(storageKey: String) {
         switch storageKey {
-        case "text": self = .text
         case "trip": self = .trip
+        case "recap": self = .recap
         case "balance": self = .balance
         case "itinerary": self = .itinerary
+        case "bookings": self = .bookings
         case "spending": self = .spending
         case "people": self = .people
-        // A card written by a newer build than this one. The reply still reads
-        // fine as prose, which is the point of keeping the text beside it.
+        case "trips": self = .trips
+        case "gaps": self = .gaps
+        // "text", or a card written by a newer build than this one. The reply
+        // still reads fine as prose, which is the point of keeping the text.
         default: return nil
         }
     }
 }
 
 extension EquiCard {
+    /// The card as one string for `equi_messages.card_kind`: the kind, then
+    /// its narrowing as `;key=value` pairs — `spending;category=meal`.
+    ///
+    /// Packed into the existing column rather than new ones, so no migration:
+    /// a build from before the narrowing reads `spending;category=meal` as a
+    /// kind it doesn't know and shows the reply as prose.
+    var storageKey: String {
+        var parts = [kind.storageKey]
+        if let category { parts.append("category=\(category.rawValue)") }
+        if let personID { parts.append("person=\(personID.uuidString)") }
+        if let day { parts.append("day=\(Self.dayFormat.string(from: day))") }
+        if let tripSet { parts.append("set=\(tripSet.rawValue)") }
+        if !tripIDs.isEmpty { parts.append("trips=\(tripIDs.map(\.uuidString).joined(separator: ","))") }
+        if let metric { parts.append("metric=\(metric.rawValue)") }
+        return parts.joined(separator: ";")
+    }
+
     /// Rebuilds a card from a saved transcript, or nothing when the row was
     /// plain prose or named a card this build doesn't know.
     init?(storageKey: String?, tripID: UUID?) {
-        guard let storageKey, let tripID, let kind = EquiCardKind(storageKey: storageKey) else { return nil }
-        self.init(kind: kind, tripID: tripID)
+        guard let storageKey else { return nil }
+        let parts = storageKey.split(separator: ";").map(String.init)
+        guard let head = parts.first, let kind = EquiCardKind(storageKey: head) else { return nil }
+        guard tripID != nil || kind == .trips else { return nil }
+
+        self.init(kind: kind, tripID: kind == .trips ? nil : tripID)
+        for part in parts.dropFirst() {
+            let pair = part.split(separator: "=", maxSplits: 1).map(String.init)
+            guard pair.count == 2 else { continue }
+            switch pair[0] {
+            case "category": category = ItineraryKind(rawValue: pair[1])
+            case "person": personID = UUID(uuidString: pair[1])
+            case "day": day = Self.dayFormat.date(from: pair[1])
+            case "set": tripSet = TripSet(rawValue: pair[1])
+            case "trips": tripIDs = pair[1].split(separator: ",").compactMap { UUID(uuidString: String($0)) }
+            case "metric": metric = Metric(rawValue: pair[1])
+            default: break
+            }
+        }
     }
+
+    private static let dayFormat: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 }
 
 // MARK: - Renderer
 
-/// Draws whichever card the model picked, reading the trip live out of the
-/// store — so a card that's been sitting in the thread for ten minutes still
-/// shows the right number after somebody logs an expense.
+/// Draws whichever card the answer called for, reading the trip live out of
+/// the store — so a card that's been sitting in the thread for ten minutes
+/// still shows the right number after somebody logs an expense.
 struct EquiCardView: View {
     @Environment(\.tripStore) private var store
     @Environment(\.colorScheme) private var scheme
 
     let card: EquiCard
+    /// For cards whose rows are trips of their own (`.trips`), where the card
+    /// as a whole has nowhere to go.
+    var onOpenTrip: (Trip) -> Void = { _ in }
 
     var body: some View {
-        if let trip = store.trip(card.tripID) {
-            content(for: trip)
+        if let content = content {
+            content
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(AppTheme.card, in: .rect(cornerRadius: 20, style: .continuous))
                 .clipShape(.rect(cornerRadius: 20, style: .continuous))
@@ -124,15 +181,21 @@ struct EquiCardView: View {
         }
     }
 
-    @ViewBuilder
-    private func content(for trip: Trip) -> some View {
+    private var content: AnyView? {
+        if card.kind == .trips {
+            return AnyView(EquiTripsCard(card: card, onOpenTrip: onOpenTrip))
+        }
+        guard let trip = store.trip(card.tripID) else { return nil }
         switch card.kind {
-        case .trip: EquiTripCard(trip: trip)
-        case .balance: EquiBalanceCard(trip: trip)
-        case .itinerary: EquiItineraryCard(trip: trip)
-        case .spending: EquiSpendingCard(trip: trip)
-        case .people: EquiPeopleCard(trip: trip)
-        case .text: EmptyView()
+        case .trip: return AnyView(EquiTripCard(trip: trip))
+        case .recap: return AnyView(EquiRecapCard(trip: trip))
+        case .balance: return AnyView(EquiBalanceCard(trip: trip, personID: card.personID))
+        case .itinerary: return AnyView(EquiItineraryCard(trip: trip, day: card.day))
+        case .bookings: return AnyView(EquiBookingsCard(trip: trip, category: card.category))
+        case .spending: return AnyView(EquiSpendingCard(trip: trip, focus: card.category))
+        case .people: return AnyView(EquiPeopleCard(trip: trip, focus: card.personID))
+        case .gaps: return AnyView(EquiGapsCard(trip: trip))
+        case .trips: return nil
         }
     }
 }
@@ -141,16 +204,17 @@ struct EquiCardView: View {
 
 /// Every card says what it is on the left and which trip it's about on the
 /// right, so a card scrolled back to a week later still explains itself.
-private struct EquiCardHeader: View {
+struct EquiCardHeader: View {
     let symbol: String
     let title: String
-    let trip: Trip
+    /// Nil on a card about several trips, where there's no one name to give.
+    let trip: Trip?
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: symbol)
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(trip.tint)
+                .foregroundStyle(trip?.tint ?? AppTheme.accent)
 
             Text(title.uppercased())
                 .font(.system(size: 10.5, weight: .bold))
@@ -159,10 +223,12 @@ private struct EquiCardHeader: View {
 
             Spacer(minLength: 6)
 
-            Text(trip.title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(AppTheme.inkTertiary)
-                .lineLimit(1)
+            if let trip {
+                Text(trip.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AppTheme.inkTertiary)
+                    .lineLimit(1)
+            }
         }
     }
 }
@@ -261,8 +327,18 @@ private struct EquiTripCard: View {
 /// tab's answer, given inline.
 private struct EquiBalanceCard: View {
     let trip: Trip
+    /// Someone the question named — their transfers go first.
+    var personID: UUID?
 
-    private var transfers: [SettlementEngine.Transfer] { Array(trip.suggestedTransfers.prefix(3)) }
+    /// The transfers that concern the person asked about (or you) first,
+    /// then everyone else's: "what does Ed owe?" shouldn't open on Kim.
+    private var transfers: [SettlementEngine.Transfer] {
+        let focus = personID ?? Traveller.you.id
+        let all = trip.suggestedTransfers
+        let mine = all.filter { $0.from == focus || $0.to == focus }
+        let rest = all.filter { $0.from != focus && $0.to != focus }
+        return Array((mine + rest).prefix(3))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -335,17 +411,30 @@ private struct EquiBalanceCard: View {
 // MARK: - 3. What's next
 
 /// The next few things on the plan, in the timeline's own row language.
+@MainActor
 private struct EquiItineraryCard: View {
     let trip: Trip
+    /// One day of the plan, when the question asked about one.
+    var day: Date?
 
-    private var upcoming: [ItineraryItem] { trip.upcoming(limit: 3) }
+    private var upcoming: [ItineraryItem] {
+        guard let day else { return trip.upcoming(limit: 3) }
+        return Array(trip.items.filter { $0.day == day }.sorted(by: Trip.chronological).prefix(5))
+    }
+
+    private var title: String {
+        guard let day else { return "Up next" }
+        if Calendar.current.isDateInToday(day) { return "Today" }
+        if Calendar.current.isDateInTomorrow(day) { return "Tomorrow" }
+        return DateFormatter.cached("EEEE d MMM").string(from: day)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
-            EquiCardHeader(symbol: "calendar", title: "Up next", trip: trip)
+            EquiCardHeader(symbol: "calendar", title: title, trip: trip)
 
             if upcoming.isEmpty {
-                Text("Nothing booked yet.")
+                Text(day == nil ? "Nothing booked yet." : "Nothing on the plan that day.")
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(AppTheme.inkTertiary)
             } else {
@@ -399,6 +488,9 @@ private struct EquiItineraryCard: View {
 /// eating the budget?" that a sentence can't give.
 private struct EquiSpendingCard: View {
     let trip: Trip
+    /// The category the question asked about: its total leads, its bar stays
+    /// lit and the rest step back.
+    var focus: ItineraryKind?
 
     private var totals: [(kind: ItineraryKind, amount: Double)] {
         Dictionary(grouping: trip.items, by: \.kind)
@@ -412,12 +504,10 @@ private struct EquiSpendingCard: View {
         VStack(alignment: .leading, spacing: 11) {
             EquiCardHeader(symbol: "chart.pie.fill", title: "Where it's going", trip: trip)
 
-            let rows = Array(totals.prefix(4))
-            let largest = rows.first?.amount ?? 1
+            let rows = focusedRows
+            let largest = totals.first?.amount ?? 1
 
-            Text(trip.projectedLabel)
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundStyle(AppTheme.ink)
+            headline
 
             if rows.isEmpty {
                 Text("Nothing has a price on it yet.")
@@ -427,11 +517,43 @@ private struct EquiSpendingCard: View {
                 VStack(spacing: 10) {
                     ForEach(rows, id: \.kind) { row in
                         bar(kind: row.kind, amount: row.amount, fraction: row.amount / largest)
+                            .opacity(focus == nil || focus == row.kind ? 1 : 0.4)
                     }
                 }
             }
         }
         .padding(14)
+    }
+
+    /// The top four, with the asked-about category always among them.
+    private var focusedRows: [(kind: ItineraryKind, amount: Double)] {
+        var rows = Array(totals.prefix(4))
+        if let focus, !rows.contains(where: { $0.kind == focus }), let row = totals.first(where: { $0.kind == focus }) {
+            rows[rows.count - 1] = row
+        }
+        return rows
+    }
+
+    @ViewBuilder
+    private var headline: some View {
+        if let focus {
+            let amount = totals.first { $0.kind == focus }?.amount ?? 0
+            let share = trip.projectedCost > 0 ? Int((amount / trip.projectedCost * 100).rounded()) : 0
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(Money.format(amount, code: trip.currencyCode))
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.ink)
+
+                Text("on \(focus.label.lowercased()) · \(share)% of \(trip.projectedLabel)")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(AppTheme.inkTertiary)
+                    .lineLimit(1)
+            }
+        } else {
+            Text(trip.projectedLabel)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundStyle(AppTheme.ink)
+        }
     }
 
     private func bar(kind: ItineraryKind, amount: Double, fraction: Double) -> some View {
@@ -506,9 +628,10 @@ private struct EquiSpendingCard: View {
 
     return ScrollView {
         VStack(spacing: 14) {
-            ForEach([EquiCardKind.trip, .balance, .itinerary, .spending, .people], id: \.self) { kind in
-                EquiCardView(card: EquiCard(kind: kind, tripID: trip.id))
+            ForEach([EquiCardKind.trip, .recap, .balance, .itinerary, .bookings, .spending, .people, .gaps], id: \.self) { kind in
+                EquiCardView(card: EquiCard(kind: kind, tripID: trip.id, category: kind == .spending ? .meal : nil))
             }
+            EquiCardView(card: EquiCard(kind: .trips, tripSet: .all))
         }
         .padding(16)
     }
@@ -522,14 +645,28 @@ private struct EquiSpendingCard: View {
 /// "who's actually paid for things?" answered per person.
 private struct EquiPeopleCard: View {
     let trip: Trip
+    /// Someone the question named: first on the list, the rest stepped back.
+    var focus: UUID?
+
+    /// The named person first, then whoever has paid most.
+    private var people: [Traveller] {
+        let sorted = trip.travellers
+            .filter { !trip.invitedIDs.contains($0.id) }
+            .sorted { trip.paid(by: $0.id) > trip.paid(by: $1.id) }
+        guard let focus, let index = sorted.firstIndex(where: { $0.id == focus }) else { return Array(sorted.prefix(5)) }
+        var ordered = sorted
+        ordered.insert(ordered.remove(at: index), at: 0)
+        return Array(ordered.prefix(5))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
             EquiCardHeader(symbol: "person.2.fill", title: "Who's on it", trip: trip)
 
             VStack(spacing: 10) {
-                ForEach(trip.travellers.prefix(5)) { traveller in
+                ForEach(people) { traveller in
                     row(for: traveller)
+                        .opacity(focus == nil || focus == traveller.id ? 1 : 0.45)
                 }
             }
         }

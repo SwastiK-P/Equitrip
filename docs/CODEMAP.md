@@ -6,7 +6,7 @@
 
 ## Equitrip — iOS app
 
-251 files, 67k lines.
+335 files, 84k lines.
 
 **(root)**
 - `ContentView.swift` (0.1k) — ContentView
@@ -40,7 +40,7 @@
 - `TripChatView.swift` (0.7k) — TripChatView — A trip's group chat.
 
 **DesignSystem/**
-- `AppTheme.swift` (0.1k) — AppTheme, Palette, AvatarPalette — Central palette + elevation tokens so screens stay visually consistent.
+- `AppTheme.swift` (0.2k) — AppTheme, Palette, AvatarPalette — Central palette + elevation tokens so screens stay visually consistent.
 - `Buttons.swift` (0.2k) — PressableButtonStyle, PrimaryButton, TextButton, CircleGlyphButton, NotificationBellButton, GlassCircleButton
 - `CodeSlotsField.swift` (0.1k) — CodeSlotsField — One box per character of an invite code.
 - `CurrencyPickerSheet.swift` (0.2k) — CurrencyPickerSheet, CurrencyOption, CurrencyRow — Picking the currency a trip is settled in.
@@ -54,6 +54,7 @@
 - `IslandToastView.swift` (0.3k) — IslandToastView, DynamicIslandMetrics — A toast that drips out of the Dynamic Island as a droplet of island-black, turns to liquid glass as it swells…
 - `Layout.swift` (0.5k) — PaneMetrics, PaneReader, AdaptiveColumns, CardGrid
 - `LocationPicker.swift` (0.2k) — LocationCompleter, LocationPickerSheet — Live place suggestions from Apple Maps.
+- `OfflineBanner.swift` (0.2k) — OfflineBanner — The pill above the tab bar that says the app is working without a connection, what that means for what you're…
 - `ParticipantPickerSheet.swift` (0.2k) — ParticipantPickerSheet, ParticipantSummaryRow — Who's on one booking.
 - `ProgressiveBlur.swift` (0.1k) — ProgressiveBlur — A blur that ramps in across a strip rather than switching on at a line.
 - `Surfaces.swift` (0.3k) — CanvasBackground, CardSurface, Hairline, SectionHeader, ConnectionBanner, LoadingState, +3
@@ -67,17 +68,35 @@
 
 **Equi/**
 - `EquiArrival.swift` (0.2k) — EquiArrivalTiming, EquiShine, EquiArrivalHaptics
-- `EquiAssistantComponents.swift` (0.5k) — EquiAuroraBackground, EquiOrb, EquiPromptWall, EquiMarqueeRow, EquiPromptStrip, EquiPromptTile, +3
+- `EquiAssistantComponents.swift` (0.6k) — EquiAuroraBackground, EquiOrb, EquiPromptWall, EquiMarqueeRow, EquiPromptStrip, EquiPromptTile, +4
 - `EquiAssistantView.swift` (0.9k) — EquiMessage, EquiPrompt, EquiAssistantView — Equi's own tab: a standalone AI chat, distinct from the per-trip group thread in `TripChatView`.
-- `EquiCard.swift` (0.6k) — EquiCardKind, EquiAnswer, EquiCard, EquiCardView — A card the model asked for, bound to a real trip.
-- `EquiContext.swift` (0.2k) — EquiContext — Turns everything the app knows about the user's trips into the plain-text briefing Equi is given before answe…
+- `EquiCard.swift` (0.7k) — EquiCardKind, EquiCard, EquiCardView, EquiCardHeader — A card under one of Equi's replies, and what it's narrowed to.
+- `EquiCardComponents.swift` (0.4k) — EquiBookingsCard, EquiTripsCard, EquiRecapCard, EquiGapsCard
+- `EquiContext.swift` (0.1k) — EquiContext — The briefing Equi's reply is written from: who it's talking to, the facts that answer this one question, and…
 - `EquiConversationList.swift` (0.2k) — EquiConversationList — Equi's past conversations as shelved rows — the body of the history sheet on a phone, and the whole of the si…
+- `EquiFacts.swift` (0.8k) — EquiFacts — Swift's answer to an `EquiQuery`: the facts that answer it, a sentence that says so, the card to draw, and wh…
 - `EquiHero.swift` (0.4k) — EquiHand, EquiHandArrow, EquiHeroScene
 - `EquiHistorySheet.swift` (0.1k) — EquiHistorySheet — Every conversation Equi has had with this account, newest first.
 - `EquiHistoryStore.swift` (0.3k) — EquiConversationSummary, EquiHistoryStore, EquiConversationRow, NewEquiConversation, EquiMessageRow — Equi's conversations, on the server.
-- `EquiIntelligence.swift` (0.2k) — EquiIntelligence — The on-device Apple Intelligence model behind Equi's chat tab.
+- `EquiIntelligence.swift` (0.2k) — EquiIntelligence — The on-device Apple Intelligence model behind Equi's chat tab, and the order it's asked things in.
+- `EquiPlanCheck.swift` (0.1k) — EquiPlanCheck — The holes in a trip's plan: nights with nowhere to sleep, days with nothing on, and no way there.
+- `EquiQuery.swift` (0.1k) — EquiQuery — What a question to Equi is about — topic, trip, category, person, day — worked out before a word of the answe…
+- `EquiQueryReader.swift` (0.5k) — EquiTopicChoice, EquiTripChoice, EquiCategoryChoice, EquiDayChoice, EquiQueryDraft, EquiQueryReader — Reads a question into an `EquiQuery`: which trips, which topic, narrowed to what.
 - `EquiSidebar.swift` (0.1k) — EquiSidebar — Equi's conversations as a floating, full-height column beside the thread, on a wide iPad.
 - `EquiSymbolPattern.swift` (0.1k) — EquiSymbolPattern — A faint wallpaper of travel and money glyphs behind Equi.
+
+**Equi/Agent/**
+- `EquiAgent.swift` (0.6k) — EquiAgent — Equi with its hands on the app: runs an `EquiAgentTask`, moving a cursor to each control and pressing it, typ…
+- `EquiAgentActivityController.swift` (0.1k) — EquiAgentActivityController — Starts, moves and ends the Live Activity for a run of `EquiAgent`.
+- `EquiAgentCursor.swift` (0.1k) — EquiAgentCursor, EquiAgentRipple — Equi's pointer: an arrow with a name tag, the way a collaborator's cursor shows up in a shared document.
+- `EquiAgentHUD.swift` (0.1k) — EquiAgentHUD, EquiAgentBadge — The capsule under the Dynamic Island while Equi works: what the job is, the step it's on, how far along, and…
+- `EquiAgentJobs.swift` (0.3k) — EquiAgentJobs — The jobs Equi can do with its hands on the app, written as the path a person would take through the screens.
+- `EquiAgentOverlay.swift` (0.1k) — EquiAgentOverlay — The layer Equi works in: its own window above the app — sheets included — holding the edge glow, the cursor,…
+- `EquiAgentQuestionCard.swift` (0.1k) — EquiAgentQuestionCard — Equi, stopped mid-job, asking the one thing it couldn't work out.
+- `EquiAgentTargets.swift` (0.2k) — EquiAgentTargets, EquiAgentProbeView — Everything Equi can press, type into or scroll, keyed by a stable id: where it is on screen right now, and wh…
+- `EquiAgentTask.swift` (0.1k) — EquiAgentTask, EquiAgentOutcome, EquiAgentQuestion, EquiAgentError — A job Equi does by working the app itself — pressing the same buttons, typing into the same fields — rather t…
+- `EquiCommandReader.swift` (0.2k) — EquiCommandReader — Reads a message to Equi as a request to *do* something — "add ₹2,400 for dinner", "settle up with Kim" — rath…
+- `EquiEdgeGlow.swift` (0.2k) — EquiEdgeGlow — Light running round the edge of the screen while Equi has the controls — the signal, readable at a glance and…
 
 **Expenses/**
 - `AuditTrailSheet.swift` (0.6k) — AuditTrailButton, AuditTrailSheet — Every recorded change to one trip, searchable and grouped by day.
@@ -110,10 +129,11 @@
 
 **Home/**
 - `AvatarPickerSheet.swift` (0.3k) — AvatarPickerSheet — Choosing the face you show up as.
+- `BookingReaderSettingsSheet.swift` (0.2k) — BookingReaderSettingsSheet — Choosing the model that reads an imported booking PDF: Apple Intelligence on this device, or one of this acco…
 - `HomeCards.swift` (0.5k) — CurrentTripCard, NewTripCard, ProgressTrack, ItineraryRow, ActivityRow, PendingSettlementsCard, +1
 - `HomeView.swift` (0.9k) — HomeView — The "where do I stand?" screen.
 - `NotificationsSheet.swift` (0.3k) — NotificationsSheet — What the bell opens.
-- `ProfileSheet.swift` (0.7k) — ProfileSheet, SettingsSheetScaffold — What the top-right avatar opens.
+- `ProfileSheet.swift` (0.8k) — ProfileSheet, SettingsSheetScaffold — What the top-right avatar opens.
 - `SiriSettingsSheet.swift` (0.2k) — SiriSettingsSheet — What you can say to Siri about your trips, and what Siri shows back.
 
 **Intelligence/**
@@ -126,7 +146,7 @@
 - `PDFReader.swift` (0.1k) — PDFReader — Pulls readable text out of a picked document.
 - `StructuredRowParser.swift` (0.1k) — StructuredRowParser — The no-Apple-Intelligence path, and the safety net under the model.
 - `TravelDate.swift` (0.2k) — TravelDate — Dates as travel documents write them, which is every way at once.
-- `TripExtraction.swift` (0.6k) — ExtractedOverview, ExtractedDayPlan, ExtractedItem, ExtractedKind, PlannedItem, PlannedDay, +2
+- `TripExtraction.swift` (0.7k) — ExtractedOverview, ExtractedDayPlan, ExtractedItem, ExtractedKind, PlannedItem, PlannedDay, +2
 
 **Intents/**
 - `AddBookingIntent.swift` (0.1k) — AddBookingIntent, BookingPeople — "Add a cooking class at 11 on Saturday to the Goa trip" — the calendar schema's *create event*, as a booking.
@@ -169,17 +189,18 @@
 
 **Itinerary/**
 - `FlightRouteMap.swift` (0.3k) — FlightRouteMap — The route, drawn on a map: two pins and the great-circle arc between them.
-- `FlightTicketCard.swift` (0.3k) — FlightTicketCard — A flight, drawn as the thing it is: a ticket.
+- `FlightTicketCard.swift` (0.3k) — FlightTicketCard, NotchedTicketShape — A flight, drawn as the thing it is: a ticket.
 - `InviteQRCode.swift` (0.1k) — InviteQRCode — The invite's QR drawn module by module, with the app icon in the middle.
-- `ItineraryItemDetailView.swift` (0.9k) — ItineraryItemDetailView — One booking, in full.
+- `ItineraryItemDetailView.swift` (1.0k) — ItineraryItemDetailView — One booking, in full.
 - `NoTripsAhead.swift` (0.3k) — NoTripsAhead — The Itinerary tab with nothing in front of it.
 - `PastTripsView.swift` (0.1k) — PastTripsView — Every trip that has ended, newest first, grouped by the year it ended.
 - `PaymentSheet.swift` (0.3k) — PaymentSheet — Recording who actually paid for something.
 - `ReceiptPreview.swift` (0.2k) — ReceiptRef, ReceiptPreview — A receipt, full screen and zoomable.
 - `TimelineComponents.swift` (0.4k) — DayHeader, DepartureMarker, TimelineRow
+- `TrainTicketCard.swift` (0.3k) — TrainTicketCard — A train booking as a compact ticket: the train, the two stations on a stretch of track, and whether the group…
 - `TripEditorSheet.swift` (0.4k) — TripEditorSheet — Editing a trip after it exists.
 - `TripInviteSheet.swift` (0.5k) — TripInviteSheet, Corner, BracketShape, QRCode — Inviting someone to a trip.
-- `TripItineraryView.swift` (1.1k) — TripItineraryView — The master itinerary, as a timeline.
+- `TripItineraryView.swift` (1.2k) — TripItineraryView — The master itinerary, as a timeline.
 - `TripListView.swift` (0.5k) — TripListView, TripPlaceCard — Every trip, grouped by where it is in its life.
 - `TripPadComponents.swift` (0.2k) — TripFactTile, TripSummaryRow, TripCostBar
 - `TripRecapCards.swift` (0.8k) — RecapHeadlineCard, RecapBreakdownCard, RecapDaysCard, RecapPayersCard, RecapYourPaymentsCard, RecapHighlightsGrid, +1
@@ -190,6 +211,7 @@
 - `ActivityEvent.swift` (0.1k) — ActivityEvent
 - `AppNotification.swift` (0.1k) — NotificationChannel, AppNotification — The switches in Settings, and what each one covers.
 - `AuditEvent.swift` (0.4k) — AuditChange, AuditEvent, AuditDay — One thing that happened on a trip, and who did it.
+- `BookingReader.swift` (0.1k) — BookingReader — Which model reads a booking PDF into bookings — chosen in Settings.
 - `DeparturePlan.swift` (0.4k) — DeparturePlan — Everything that happens if a given person leaves on a given day, worked out before anybody commits to it.
 - `FlightDetails.swift` (0.1k) — FlightDetails — What live lookup adds on top of a manually entered flight: the route, scheduled times as the airline states t…
 - `FoundationExtensions.swift` (0.1k) — ext DateFormatter, ext Int, ext Date
@@ -199,6 +221,7 @@
 - `PaymentMethod.swift` (0.1k) — PaymentMethod — How a booking was actually settled with the vendor.
 - `QuickAction.swift` (0.1k) — QuickAction
 - `SplitMode.swift` (0.1k) — SplitMode — The models the brief calls for.
+- `TrainDetails.swift` (0.1k) — TrainDetails — What a PNR lookup adds to a train booking: the train, the stations, each passenger's berth, whether the chart…
 - `Traveller.swift` (0.2k) — Traveller, CurrentUser
 - `Trip.swift` (0.5k) — Trip, TripDay, TripPhoto
 - `TripDeparture.swift` (0.3k) — TripDeparture — Somebody leaving a trip that's already running, and the arithmetic that closes their side of it.
@@ -208,12 +231,13 @@
 
 **NewTrip/**
 - `ItineraryIssueCard.swift` (0.3k) — ItineraryIssueCard — What the consistency check found, on the screen where it can still be acted on cheaply.
-- `ItineraryItemEditor.swift` (1.0k) — ItineraryItemEditor — Editing one booking — including the three things that make a group ledger different from a shared spreadsheet…
+- `ItineraryItemEditor.swift` (1.1k) — ItineraryItemEditor — Editing one booking — including the three things that make a group ledger different from a shared spreadsheet…
 - `JoinTripFlow.swift` (0.4k) — JoinTripFlow — Joining someone else's trip.
 - `NewTripFlow.swift` (0.6k) — NewTripFlow — Creating a trip, both ways in.
-- `QuickAddSheet.swift` (0.5k) — QuickAddSheet — Logging something that just happened.
+- `QuickAddSheet.swift` (0.6k) — QuickAddSheet — Logging something that just happened.
 - `StageActionBar.swift` (0.1k) — StageActionBar — The one button at the foot of every step of the creation flow.
 - `StepRail.swift` (0.1k) — StepRail — Where the creation flow is, drawn as the questions themselves rather than as a bar.
+- `TrainTrackingSection.swift` (0.2k) — TrainTrackingSection — The booking editor's PNR field for a train: type the ten digits, look it up, get the ticket.
 - `TripCoverCard.swift` (0.2k) — TripCoverCard — The trip as an object you can touch: its photograph, its name and where it's going, in one card.
 - `TripDatesStage.swift` (0.1k) — TripDatesStage — Step two: when.
 - `TripImportStage.swift` (0.6k) — TripImportStage — Picks a PDF and watches the document being read.
@@ -255,7 +279,7 @@
 - `ControlRoutes.swift` (0.1k) — ControlRoutes — Hears a Control Centre / Lock Screen button press while the app is already running.
 - `EquitripShortcuts.swift` (0.2k) — EquitripShortcuts — The sentences Siri knows before anyone has set anything up.
 - `ItineraryRoute.swift` (0.1k) — ItineraryRoute — A screen on the Itinerary tab's stack.
-- `RootTabView.swift` (0.4k) — AppTab, RootTabView — The tabs the product actually needs.
+- `RootTabView.swift` (0.5k) — AppTab, RootTabView — The tabs the product actually needs.
 
 **Scanning/**
 - `BoardingPassScanner.swift` (0.1k) — BoardingPassScanner, BoardingPassReader — Scans a boarding pass with the camera and pulls the flight number off it.
@@ -272,6 +296,10 @@
 - `FlightLookupService.swift` (0.2k) — FlightLookupService — Turns a flight number into a route, scheduled times and a live status.
 - `GlobalOverlayWindow.swift` (0.1k) — GlobalOverlayWindow — Puts `GlassToastOverlay` above everything else on screen, sheets and full screen covers included.
 - `MediaStore.swift` (0.1k) — MediaStore — The two images people upload themselves: a face and a receipt.
+- `NetworkMonitor.swift` (0.1k) — NetworkMonitor, SimulatedOffline — Whether this phone can reach anything at all, as the system sees it.
+- `NugenService.swift` (0.1k) — NugenService — The booking reader's line to Nugen: the `nugen-reader` Supabase function, which holds the API key and the ins…
+- `OfflineCache.swift` (0.1k) — OfflineCache — The last copy of this account's trips, notifications and profile that the server sent, kept on the phone.
+- `OfflineOutbox.swift` (0.3k) — OfflineOutbox — Changes made on this phone that the server hasn't taken yet, in the order they were made.
 - `PhotoConfig.swift` (0.1k) — PhotoConfig — Where to get destination photography.
 - `PhotoService.swift` (0.3k) — PhotoService — Where destination and activity photography comes from.
 - `ShakeDetector.swift` (0.1k) — ext Notification.Name, ext UIWindow
@@ -279,9 +307,12 @@
 - `SupabaseConfig.swift` (0.1k) — SupabaseConfig — Project connection details.
 - `SupabaseRepository.swift` (0.9k) — SupabaseRepository — Everything that talks to Postgres.
 - `SupabaseRows.swift` (0.5k) — ProfileRow, MembershipRow, ProfileIDRow, TripPreviewPersonRow, JoinTripRow, TripPreviewRow, +10
+- `TrainLookupService.swift` (0.3k) — TrainLookupService — Turns a PNR into a train, berths and a live running status.
 - `TravellerDirectory.swift` (0.2k) — TravellerDirectory — Turning an email address into a person.
 - `UPI.swift` (0.1k) — UPILink — Building the one URL every UPI app on the phone already knows how to open.
 - `WatchBridge.swift` (0.2k) — WatchBridge — The phone's half of the watch app.
+- `WeatherConfig.swift` (0.1k) — WeatherConfig — Where the twin's forecasts come from.
+- `WidgetImageWriter.swift` (0.1k) — WidgetImageWriter — Writes the pictures the widgets draw — each trip's cover and the face of everyone waiting on a settlement — i…
 - `WidgetPublisher.swift` (0.3k) — WidgetPublisher — Flattens the live trip list into the shape the widgets read.
 
 **Settle/**
@@ -298,17 +329,85 @@
 **Stores/**
 - `AppContext.swift` (0.1k) — AppContext — The stores, for code that runs with no screen on it: Siri, Shortcuts, Spotlight, Visual Intelligence and the…
 - `AuditTrail.swift` (0.7k) — AuditTrail — Every change ever made to a trip, and who made it.
-- `NotificationStore.swift` (0.4k) — NotificationStore — The notification list, and whether you've read it.
-- `TripStore.swift` (1.0k) — TripStore — Single source of truth for trips, backed entirely by Supabase.
+- `NotificationStore.swift` (0.5k) — NotificationStore — The notification list, and whether you've read it.
+- `TripStore.swift` (1.1k) — TripStore — Single source of truth for trips, backed entirely by Supabase.
+
+**Twin/**
+- `WeatherTwinStore.swift` (0.3k) — WeatherTwinStore — The Weather Twin for each trip: where its bookings are, the weather over them, what people on the ground are…
+
+**Twin/Actions/**
+- `IndoorScout.swift` (0.2k) — IndoorScout — Somewhere under a roof near a booking the weather threatens: found on Apple Maps, ranked by the on-device mod…
+- `PlaceSearchTool.swift` (0.1k) — PlaceSearchTool — The model's own Maps search, for an indoor swap: it knows a heritage walk in Varanasi suits a history museum…
+- `ScoutPlace.swift` (0.2k) — ScoutPlace — A place Apple Maps returned while looking for somewhere under a roof, as plain values off the main actor — th…
+- `ScoutPool.swift` (0.1k) — ScoutPool — Every place found during one search for an indoor swap — by Swift's sweep or by the model's own searches — an…
+- `TravelTimeTool.swift` (0.1k) — TravelTimeTool — How long it takes to get from the threatened booking to a place already found, routed by Maps — on foot under…
+- `TwinAction.swift` (0.1k) — TwinAction — Something the group could do about a booking the weather threatens.
+- `TwinActionPlanner.swift` (0.2k) — TwinActionPlanner — Turns a simulation into proposals: for each booking at risk, the few things that would actually help, most us…
+- `TwinActionQueue.swift` (0.2k) — TwinActionExecutor, TwinActionOutcome, TwinActionPresentation, DiscussExecutor, TwinActionQueue — Plan B: the actions people have chosen, per trip, and where each one is.
+- `TwinAgentJobs.swift` (0.3k) — TwinAgentJobs — The Plan B actions Equi carries out with its hands on the app: swap an outdoor plan for somewhere indoors, mo…
+
+**Twin/Engine/**
+- `ImpactModel.swift` (0.2k) — WeatherFeatures, ImpactDriver, ImpactModel — The chance weather disrupts a booking, given the weather it's in.
+- `RiskLevel.swift` (0.1k) — RiskLevel — How worried to be, in four steps — the one scale every weather surface in the app shares, so a chip on the ti…
+- `TripTwin.swift` (0.2k) — TwinNode, TwinEdge, TripTwin — The trip as a graph the weather can move through.
+- `TwinGeocoder.swift` (0.1k) — TwinGeocoder — Where a trip's bookings are, for the map and for the weather.
+- `TwinLearning.swift` (0.2k) — TwinCalibration, TwinLearning — The twin's learning loop: record what happened, pool it, calibrate on it.
+- `TwinResult.swift` (0.1k) — Quantiles, NodeOutcome, ShareImpact, ExtraNight, TwinResult — Everything one simulation found.
+- `TwinScenario.swift` (0.2k) — TwinScenario — A what-if: weather that isn't forecast, laid over weather that is.
+- `TwinSimulator.swift` (0.4k) — TwinSimulator, SeededGenerator — Runs the trip through a few hundred plausible futures and counts what happens to each booking.
+- `WeatherExposure.swift` (0.1k) — WeatherExposure — How weather gets at a booking — the property the twin reasons about, rather than the booking's category.
+
+**Twin/Signals/**
+- `SignalDigest.swift` (0.1k) — SignalDigest — What the public signals add up to: which conditions people are reporting, whether that's building or easing,…
+- `SignalReader.swift` (0.3k) — SignalTopic, SignalSeverity, SignalVerdict, SignalBatchReading, SignalReader — Decides which public posts are real reports about the weather where the trip is, and what each one reports.
+- `SocialSignal.swift` (0.1k) — SocialSignal — One public post, article or official alert about the weather where the trip is — with who said it, where, and…
+- `SocialSignalService.swift` (0.3k) — SocialSignalService, RSSReader — Collects what people, newsrooms and disaster agencies are publicly saying about the weather where the trip is.
+
+**Twin/Views/**
+- `BookingWeatherSection.swift` (0.2k) — BookingWeatherSection — One booking's weather, on its detail sheet: the conditions it'll be in, what the twin makes of them, what cou…
+- `PlanBTray.swift` (0.1k) — PlanBTray — The actions people have chosen for this trip, and where each one stands.
+- `ScenarioDial.swift` (0.2k) — ScenarioDial — One what-if parameter as a round dial: a three-quarter arc turned with a finger, the value in the middle, wha…
+- `ScenarioPresetGrid.swift` (0.1k) — ScenarioPresetGrid — The first choice in a what-if: which weather to play out.
+- `ScenarioSkyCard.swift` (0.1k) — ScenarioSkyCard — The what-if weather, drawn: the sky it describes, falling as hard as the rain dial says, with the event's fig…
+- `ScenarioStrengthCard.swift` (0.1k) — ScenarioStrengthCard — How bad the what-if weather is: four dials in a grid — rain, gusts, heat, flooding — and lightning as a switc…
+- `ScenarioTimingCard.swift` (0.4k) — ScenarioTimingCard — When and where the what-if weather hits, drawn over the bookings it could hit.
+- `SignalAlertCallout.swift` (0.1k) — SignalAlertCallout — What opens when a ground-report pin on the Weather Twin map is tapped: the reports about that place, stronges…
+- `SocialPulseCard.swift` (0.1k) — SocialPulseCard, SignalRow — What people, newsrooms and disaster agencies are saying where the trip is.
+- `TimelineWeatherChip.swift` (0.2k) — TimelineWeatherChip, DayWeatherBadge, TwinEntryCard — The weather a booking will be in, on its timeline card: the sky, the temperature, and — only when the twin is…
+- `TwinActionChip.swift` (0.1k) — TwinActionChip — One suggested action: tap to put it in Plan B (or take it out); actions that can already run show a play affo…
+- `TwinBadges.swift` (0.2k) — SourceBadge, LiveDot, RiskPill, UncertaintyBar, WeatherGlyph, TwinFormat
+- `TwinBookingList.swift` (0.3k) — TwinBookingList, TwinBookingRow, TwinActionRow — The bookings the weather threatens, as one list: what, when, how likely, and why — with the fixes one tap awa…
+- `TwinDaysCard.swift` (0.1k) — TwinDaysCard — The trip's days as rows: each one's sky, its chance of rain, and where its range sits among the trip's — the…
+- `TwinHourlyCard.swift` (0.1k) — TwinHourlyCard — The next day of weather in eight three-hour steps, with the trip's bookings under the steps they start in.
+- `TwinImpactCard.swift` (0.2k) — TwinImpactCard — The twin's answer: how worried to be, what's worst, and what it could cost — in live mode against nothing, in…
+- `TwinMap.swift` (0.3k) — TwinMap, TwinNodePin, WeatherPlaceMarker, SignalClusterMarker — The twin, on a map: every booking where it is, coloured by its risk; the dependencies between them drawn as l…
+- `TwinNowCard.swift` (0.1k) — TwinNowCard — The weather where the trip is, right now, in one compact card.
+- `TwinPanel.swift` (0.2k) — TwinPanel, TwinPanelDetent — A sheet that lives on top of a map without being a presentation: three resting heights, dragged by its grabbe…
+- `TwinSourcesCard.swift` (0.1k) — TwinSourcesCard — Where every number on the twin came from, and how much the model has learned — folded to one line until someo…
+- `WeatherSky.swift` (0.2k) — WeatherSky — The sky the weather is, drawn live behind the conditions: sun glow on a clear day, drifting cloud, rain whose…
+- `WeatherTwinView.swift` (0.7k) — WeatherTwinView, TwinLoadingCards — A trip's Weather Twin: the map of where everything is and what the weather is doing to it, with the live pict…
+- `WeatherWatchCard.swift` (0.2k) — WeatherWatchCard — Home's line into the Weather Twin, for the trip that's on.
+
+**Twin/Weather/**
+- `GeoPoint.swift` (0.1k) — GeoPoint — A coordinate that can be stored, hashed and compared.
+- `OpenMeteoCache.swift` (0.1k) — OpenMeteoCache — Open-Meteo responses kept on disk, keyed by request.
+- `OpenMeteoService.swift` (0.4k) — OpenMeteoService — The free, keyless half of the twin's weather: forecasts, the ensemble, history, floods and air — everywhere o…
+- `PlaceWeather.swift` (0.1k) — WeatherHour, WeatherDay, PlaceWeather — Everything the twin knows about the weather at one place.
+- `WeatherCondition.swift` (0.1k) — WeatherCondition — What the sky is doing, in the handful of families the screens draw.
+- `WeatherFusion.swift` (0.3k) — WeatherFusion — Builds one `PlaceWeather` from every source that can speak for a place, and makes them agree.
+- `WeatherReading.swift` (0.1k) — WeatherReading — The weather at one place right now, with each figure's source kept.
+- `WeatherSource.swift` (0.1k) — WeatherSource — Where a number on the weather screens came from.
+- `WeatherUnionService.swift` (0.1k) — WeatherUnionService — Live readings from Zomato's Weather Union stations, through the `weather-union` Supabase function.
 
 ## EquitripShared — compiled into app + widgets + watch (see membership exceptions in project.pbxproj)
 
-7 files, 1k lines.
+8 files, 1k lines.
 
 **(root)**
 - `AddExpenseIntent.swift` (0.1k) — AddExpenseIntent — Opens the app on the quick-add sheet.
 - `Brand.swift` (0.1k) — Brand — The palette, in the one place both the app and its widgets can read it.
-- `EquitripSnapshot.swift` (0.5k) — EquitripSnapshot, SharedStore — What the widgets are allowed to know.
+- `EquiAgentActivity.swift` (0.1k) — EquiAgentAttributes, EquiAgentAnswerIntent, EquiAgentRemote
+- `EquitripSnapshot.swift` (0.6k) — EquitripSnapshot, SharedImages, SharedStore — What the widgets are allowed to know.
 - `OpenEquiIntent.swift` (0.1k) — OpenEquiIntent — Opens the app on Equi.
 - `SnapshotStyle.swift` (0.1k) — MoneyTone — Direction, not sentiment — the same rule `AppTheme` states for the app.
 - `TripTitleStyle.swift` (0.1k) — TripTitleStyle — The typeface a trip's name is set in, chosen by whoever organises it.
@@ -316,19 +415,20 @@
 
 ## EquitripWidgets — WidgetKit extension: widgets, controls
 
-10 files, 2k lines.
+11 files, 2k lines.
 
 **(root)**
 - `AddExpenseControl.swift` (0.1k) — AddExpenseControl — "I just paid for that" as a single press, from Control Centre, the Lock Screen, or the Action button.
 - `AskEquiControl.swift` (0.1k) — AskEquiControl — Equi in one press, from Control Centre, the Lock Screen, or the Action button.
 - `BalanceWidget.swift` (0.3k) — BalanceWidget, BalanceWidgetView — Where you stand, on the home screen and the lock screen.
+- `EquiAgentLiveActivity.swift` (0.6k) — EquiAgentLiveActivity — Equi's job, live on the Lock Screen and in the Dynamic Island, for when the app is out of sight: each step as…
 - `EquitripWidgetBundle.swift` (0.1k) — EquitripWidgetBundle
 - `SelectTripIntent.swift` (0.1k) — TripEntity, TripEntityQuery, SelectTripIntent — The "Up next" widget's edit-sheet configuration: which trip to follow, or none for the old behaviour of trail…
 - `SettleWidget.swift` (0.4k) — SettleWidget, SettleWidgetView — Who's paid you and is waiting on a confirmation.
 - `SnapshotProvider.swift` (0.1k) — SnapshotProvider, SnapshotEntry, TripTimelineProvider, TripTimelineEntry — One timeline provider for every widget in the bundle.
 - `TimelineWidget.swift` (0.3k) — TimelineWidget, TimelineWidgetView — What happens next on the trip you're on.
-- `TripsWidget.swift` (0.4k) — TripsWidget, TripsWidgetView — Every trip that's live or still to come, in one glance.
-- `WidgetChrome.swift` (0.3k) — WidgetCanvas, SplitBar, DottedFigure, ScopeLine, WidgetSymbolBadge, InitialAvatar, +4
+- `TripsWidget.swift` (0.3k) — TripsWidget, TripsWidgetView — The one trip that matters right now — the one under way, or else the next to start — drawn the way Home's tri…
+- `WidgetChrome.swift` (0.4k) — WidgetCanvas, SplitBar, DottedFigure, ScopeLine, WidgetSymbolBadge, TripCoverBadge, +5
 
 ## EquitripWatch Watch App — watchOS app, fed by WatchConnectivity snapshots
 

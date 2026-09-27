@@ -158,6 +158,8 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
         var coverURL: URL?
         /// The trip's SF Symbol, for the cover's place when there's no photo.
         var symbol: String?
+        /// The first few people on it, whose faces the Trips widget stacks.
+        var travellerIDs: [UUID]?
 
         enum Phase: String, Codable { case upcoming, live, past }
     }
@@ -248,6 +250,8 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
         var tripID: UUID
         var tripTitle: String
         var fromName: String
+        /// Whose face to draw — the key to their picture in `SharedImages`.
+        var fromID: UUID?
         /// Formatted by the app, like every other figure here.
         var amountLabel: String
         var methodLabel: String
@@ -421,12 +425,36 @@ nonisolated struct EquitripSnapshot: Codable, Equatable {
 /// hundred bytes, it is replaced wholesale every time, and `UserDefaults`
 /// already handles the cross-process coordination that a file would need
 /// arranging by hand.
+/// Pictures the app hands the widgets: trip covers and people's faces, as
+/// small JPEGs in the app group's container.
+///
+/// A widget has no session and no time to download anything, so it used to
+/// draw a suitcase for every trip and an initial for every person. The app
+/// writes these after each publish (`WidgetImageWriter`); the snapshot only
+/// carries ids, and a widget falls back to the glyph when a file isn't there.
+nonisolated enum SharedImages {
+    static func coverKey(_ tripID: UUID) -> String { "cover-\(tripID.uuidString)" }
+    static func faceKey(_ travellerID: UUID) -> String { "face-\(travellerID.uuidString)" }
+    /// The cover at widget-background size, not cropped square.
+    static func wideCoverKey(_ tripID: UUID) -> String { "coverwide-\(tripID.uuidString)" }
+
+    static var directory: URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: SharedStore.appGroup)?
+            .appendingPathComponent("WidgetImages", isDirectory: true)
+    }
+
+    static func fileURL(_ key: String) -> URL? {
+        directory?.appendingPathComponent(key + ".jpg")
+    }
+}
+
 enum SharedStore {
 
     /// Must match the App Groups capability on both targets. Changing it
     /// silently detaches every installed widget from the app, so it lives
     /// here as one constant rather than being spelled out at each end.
-    static let appGroup = "group.com.swastik.Equitrip"
+    nonisolated static let appGroup = "group.com.swastik.Equitrip"
 
     private static let snapshotKey = "widget.snapshot"
 

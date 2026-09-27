@@ -146,10 +146,20 @@ final class EquiHistoryStore {
     }
 
     /// Lands a chunk of a streaming reply in place. Local only.
-    func stream(_ id: UUID, text: String, card: EquiCard?) {
+    func stream(_ id: UUID, reply: EquiIntelligence.Reply) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].text = text
-        messages[index].card = card
+        messages[index].text = reply.text
+        messages[index].card = reply.card
+        messages[index].focusTripID = reply.focusTripID ?? reply.card?.tripID
+        messages[index].suggestions = reply.suggestions
+    }
+
+    /// Takes the follow-up chips off the last reply once the conversation has
+    /// moved past it. Local only; they were never saved.
+    func clearSuggestions() {
+        for index in messages.indices where !messages[index].suggestions.isEmpty {
+            messages[index].suggestions = []
+        }
     }
 
     /// Saves a streamed reply now that it has stopped moving.
@@ -185,8 +195,8 @@ final class EquiHistoryStore {
                     profile_id: profile,
                     is_user: message.isUser,
                     body: message.text,
-                    card_kind: message.card?.kind.storageKey,
-                    card_trip_id: message.card?.tripID,
+                    card_kind: message.card?.storageKey,
+                    card_trip_id: message.card?.tripID ?? message.focusTripID,
                     created_at: message.sentAt
                 )
                 // Upsert, not insert: a reply that is saved and then corrected
@@ -310,7 +320,8 @@ nonisolated struct EquiMessageRow: Codable {
             text: body,
             isUser: is_user,
             card: EquiCard(storageKey: card_kind, tripID: card_trip_id),
-            sentAt: created_at
+            sentAt: created_at,
+            focusTripID: card_trip_id
         )
     }
 }

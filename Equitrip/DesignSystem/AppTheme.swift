@@ -99,6 +99,9 @@ enum Palette {
     static let greenDeep = AppTheme.dynamic(light: 0x1E7A55, dark: 0x2E9C72)
     static let amberDeep = AppTheme.dynamic(light: 0xD97706, dark: 0xC98A2E)
     static let violetDeep = AppTheme.dynamic(light: 0x7C4DE0, dark: 0x6B45C0)
+    /// A true yellow, not `amber`'s orange. Only for solid fills behind a
+    /// white glyph (`OfflineBanner`), deep enough that the glyph still reads.
+    static let yellow = AppTheme.dynamic(light: 0xF2B500, dark: 0xF2B500)
 
     /// Light thrown across a near-black surface (`SlideToRespond`'s track).
     /// `positive` is tuned for text on white and goes muddy as a glow on

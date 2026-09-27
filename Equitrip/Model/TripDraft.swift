@@ -31,6 +31,10 @@ struct TripDraft {
     var wasImported = false
     var usedFallbackParser = false
     var sourceFileName: String?
+    /// The Nugen model that read the document, when it wasn't Apple
+    /// Intelligence. The review note names it, and the days it was unsure of.
+    var nugenModel: String?
+    var unsureDays: [Int] = []
 
     /// How many people the document said were travelling. Kept separate from
     /// `travellers` on purpose: the count is a fact the document gave us, the
@@ -125,6 +129,8 @@ struct TripDraft {
         draft.wasImported = true
         draft.usedFallbackParser = usedFallback
         draft.sourceFileName = fileName
+        draft.nugenModel = progress.nugenModel
+        draft.unsureDays = progress.unsureDays
 
         if !progress.title.isEmpty { draft.title = progress.title }
         if !progress.destination.isEmpty { draft.destination = progress.destination }

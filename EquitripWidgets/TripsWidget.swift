@@ -6,13 +6,15 @@
 import SwiftUI
 import WidgetKit
 
-/// Every trip that's live or still to come, in one glance.
+/// The one trip that matters right now — the one under way, or else the next
+/// to start — drawn the way Home's trip card is: its cover photo filling the
+/// tile, the name in the display face over it, and where you stand on a
+/// frosted bar along the bottom.
 ///
-/// Balance answers "where do I stand" and "Up next" narrates one trip's plan;
-/// neither says "what am I even on right now" when there's more than one
-/// trip going at once — a family holiday overlapping a friends' weekend, or
-/// next month's trip already half-planned. This is Home's trip list, reduced
-/// to what a widget can draw without a photo.
+/// It used to be a list: a suitcase glyph per trip on the peach canvas, which
+/// read as a settings row, not a trip. A home-screen widget is glanced at, and
+/// the glance is "what am I on next and what's it costing me" — one trip
+/// answers that; a queue doesn't.
 struct TripsWidget: Widget {
     static let kind = "EquitripTrips"
 
@@ -20,9 +22,10 @@ struct TripsWidget: Widget {
         StaticConfiguration(kind: Self.kind, provider: SnapshotProvider()) { entry in
             TripsWidgetView(snapshot: entry.snapshot)
         }
-        .configurationDisplayName("Trips")
-        .description("Your live and upcoming trips, with where you stand on each.")
+        .configurationDisplayName("Trip")
+        .description("Your trip under way, or the next one, with your share.")
         .supportedFamilies([.systemMedium, .systemLarge])
+        .contentMarginsDisabled()
     }
 }
 
@@ -31,148 +34,234 @@ struct TripsWidgetView: View {
 
     let snapshot: EquitripSnapshot
 
-    /// Live first — the one somebody's most likely mid-way through — then
-    /// whichever starts soonest, so the list reads as a queue rather than the
-    /// order sync happened to return.
-    private var trips: [EquitripSnapshot.TripSummary] {
-        snapshot.allTrips.sorted { lhs, rhs in
-            if lhs.phase != rhs.phase { return lhs.phase == .live }
-            return (lhs.startDate ?? .distantFuture) < (rhs.startDate ?? .distantFuture)
-        }
+    /// Live first; otherwise whichever upcoming trip starts soonest. Past
+    /// trips never lead — a finished trip isn't what a glance is for.
+    private var trip: EquitripSnapshot.TripSummary? {
+        snapshot.allTrips
+            .filter { $0.phase != .past }
+            .sorted { lhs, rhs in
+                if lhs.phase != rhs.phase { return lhs.phase == .live }
+                return (lhs.startDate ?? .distantFuture) < (rhs.startDate ?? .distantFuture)
+            }
+            .first
     }
-
-    private var destination: URL? { URL(string: "equitrip://trips") }
 
     var body: some View {
-        Group {
-            if snapshot.hasTrips, let lead = trips.first {
-                if family == .systemLarge { large(lead: lead) } else { medium }
+        if let trip {
+            TripHeroCard(trip: trip, isLarge: family == .systemLarge)
+                .widgetURL(trip.link)
+                .containerBackground(for: .widget) { TripHeroBackground(trip: trip) }
+        } else {
+            WidgetEmptyState(
+                symbol: "suitcase.fill",
+                title: "No trip coming up",
+                detail: "Start a trip in Equitrip and it'll show up here."
+            )
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .widgetURL(URL(string: "equitrip://trips"))
+            .widgetCanvas()
+        }
+    }
+}
+
+// MARK: - Background
+
+/// The cover photo, darkened towards the bottom so white type stays legible
+/// on any picture. Without a cover, a deep gradient in the trip's colour.
+private struct TripHeroBackground: View {
+    let trip: EquitripSnapshot.TripSummary
+
+    var body: some View {
+        ZStack {
+            if let image = sharedImage(SharedImages.wideCoverKey(trip.id)) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
             } else {
-                WidgetEmptyState(
-                    symbol: "suitcase.fill",
-                    title: "No trips yet",
-                    detail: "Start a trip in Equitrip and it'll show up here."
+                LinearGradient(
+                    colors: [trip.tint.mix(with: .black, by: 0.35), trip.tint.mix(with: .black, by: 0.7)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Image(systemName: trip.badgeSymbol)
+                    .font(.system(size: 120, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.07))
+                    .offset(x: 90, y: -20)
+            }
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.25), location: 0),
+                    .init(color: .clear, location: 0.3),
+                    .init(color: .black.opacity(0.35), location: 0.6),
+                    .init(color: .black.opacity(0.75), location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+}
+
+// MARK: - Card
+
+private struct TripHeroCard: View {
+    let trip: EquitripSnapshot.TripSummary
+    let isLarge: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center) {
+                PhasePill(trip: trip)
+                Spacer(minLength: 6)
+                FaceStack(ids: trip.travellerIDs ?? [], total: trip.travellerCount ?? 0)
+            }
+
+            Spacer(minLength: 6)
+
+            if isLarge {
+                titleBlock
+                statusBar.padding(.top, 12)
+            } else {
+                HStack(alignment: .bottom, spacing: 10) {
+                    titleBlock
+                    Spacer(minLength: 6)
+                    figure(size: 19)
+                }
+            }
+        }
+        .padding(isLarge ? 16 : 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(trip.title)
+                .font(Brand.display(isLarge ? 32 : 24))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(subtitle)
+                .font(.system(size: isLarge ? 13 : 11.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.78))
+                .lineLimit(1)
+        }
+        .shadow(color: .black.opacity(0.3), radius: 6, y: 1)
+    }
+
+    /// "28 Sep–1 Oct · 22 bookings · ₹1,45,520" on large, dates and
+    /// bookings on medium where the figure sits beside it.
+    private var subtitle: String {
+        var parts = [trip.dateRange]
+        if let bookings = trip.bookingLabel { parts.append(bookings) }
+        if isLarge, let projected = trip.projectedLabel { parts.append(projected) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func figure(size: CGFloat) -> some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(trip.figure.value)
+                .font(.system(size: size, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+            Text(trip.figure.caption)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .shadow(color: .black.opacity(0.3), radius: 6, y: 1)
+    }
+
+    /// Frosted strip: how far in (or when it starts) as the day track, and
+    /// the figure. Widgets can't blur what's behind them, so the frost is a
+    /// translucent white over the already-darkened photo.
+    private var statusBar: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(trip.phase == .live ? trip.progressLabel : "Starts \(trip.progressLabel.lowercased())")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                DayTrack(
+                    progress: trip.phase == .live ? trip.progress : 0,
+                    days: trip.dayCount ?? 1,
+                    tint: .white,
+                    height: 5,
+                    track: .white.opacity(0.22)
                 )
             }
+
+            Rectangle()
+                .fill(.white.opacity(0.2))
+                .frame(width: 1, height: 34)
+
+            figure(size: 22)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // The fallback tap target. Rows carry their own `Link`, so this only
-        // catches the header and the gaps between them.
-        .widgetURL(destination)
-        .widgetCanvas()
-    }
-
-    private var header: some View {
-        ScopeLine(
-            title: "Trips",
-            symbol: "suitcase.fill",
-            trailing: trips.count == 1 ? "1 active" : "\(trips.count) active"
-        )
-    }
-
-    // MARK: - Medium
-
-    /// Two rows, separated by a hairline and spread to fill the tile — hung
-    /// from the top they left a strip of empty gradient under the second.
-    private var medium: some View {
-        let shown = Array(trips.prefix(2))
-
-        return VStack(alignment: .leading, spacing: 0) {
-            header
-
-            Spacer(minLength: 8)
-
-            ForEach(Array(shown.enumerated()), id: \.element.id) { index, trip in
-                TripRow(trip: trip)
-
-                if index < shown.count - 1 {
-                    WidgetHairline()
-                        .padding(.leading, 48)
-                        .padding(.vertical, 9)
-                }
-            }
-
-            Spacer(minLength: 0)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.16), in: .rect(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(.white.opacity(0.18), lineWidth: 1)
         }
     }
+}
 
-    // MARK: - Large
+/// "● Live" / "● Upcoming" on a dark translucent capsule, readable on any photo.
+private struct PhasePill: View {
+    let trip: EquitripSnapshot.TripSummary
 
-    /// The lead trip as a card with room for its progress and the balance at
-    /// full size; the rest queue underneath. With nothing else planned, the
-    /// space goes to what's next on the lead trip instead of standing empty.
-    private func large(lead: EquitripSnapshot.TripSummary) -> some View {
-        let others = Array(trips.dropFirst().prefix(2))
-        let events = Array(leadEvents(lead).prefix(3))
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(trip.phase == .live ? Brand.green : Brand.accent)
+                .frame(width: 6, height: 6)
+            Text(trip.phase == .live ? "Live" : "Upcoming")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.black.opacity(0.28), in: .capsule)
+        .overlay { Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 1) }
+    }
+}
 
-        return VStack(alignment: .leading, spacing: 0) {
-            header
+/// The first three people on the trip, overlapping, with a white ring.
+private struct FaceStack: View {
+    let ids: [UUID]
+    let total: Int
+    private let size: CGFloat = 26
 
-            FeaturedTripCard(trip: lead)
-                .padding(.top, 10)
-
-            if !others.isEmpty {
-                sectionLabel("Also coming up")
-
-                VStack(spacing: 0) {
-                    ForEach(Array(others.enumerated()), id: \.element.id) { index, trip in
-                        TripRow(trip: trip)
-
-                        if index < others.count - 1 {
-                            WidgetHairline()
-                                .padding(.leading, 48)
-                                .padding(.vertical, 8)
-                        }
+    var body: some View {
+        HStack(spacing: -size * 0.3) {
+            ForEach(ids.prefix(3), id: \.self) { id in
+                Group {
+                    if let image = sharedImage(SharedImages.faceKey(id)) {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    } else {
+                        Circle().fill(.white.opacity(0.3))
                     }
                 }
-            } else if !events.isEmpty {
-                sectionLabel("Next on \(lead.title)")
-
-                VStack(spacing: 8) {
-                    ForEach(events) { event in
-                        HStack(spacing: 8) {
-                            ClockGutter(value: event.clockValue, meridiem: event.clockMeridiem)
-                            WidgetSymbolBadge(symbol: event.symbol, tint: event.tint, size: 26)
-                            Text(event.title)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Brand.ink)
-                                .lineLimit(1)
-                            Spacer(minLength: 4)
-                            if let share = event.shareAmountLabel {
-                                Text(share)
-                                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(Brand.inkSecondary)
-                            }
-                        }
-                    }
-                }
+                .frame(width: size, height: size)
+                .clipShape(.circle)
+                .overlay { Circle().strokeBorder(.white.opacity(0.9), lineWidth: 1.5) }
             }
-
-            Spacer(minLength: 0)
+            if total > 3 {
+                Text("+\(total - 3)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(width: size, height: size)
+                    .background(.black.opacity(0.4), in: .circle)
+                    .overlay { Circle().strokeBorder(.white.opacity(0.9), lineWidth: 1.5) }
+            }
         }
-    }
-
-    private func leadEvents(_ trip: EquitripSnapshot.TripSummary) -> [EquitripSnapshot.Event] {
-        if let events = snapshot.eventsByTrip[trip.id] { return events }
-        return trip.id == snapshot.currentTrip?.id ? snapshot.upNext : []
-    }
-
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.system(size: 9.5, weight: .bold))
-            .tracking(0.6)
-            .foregroundStyle(Brand.inkTertiary)
-            .lineLimit(1)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
     }
 }
 
 // MARK: - Phase styling
 
 private extension EquitripSnapshot.TripSummary {
-    /// Indigo for under way, teal for still to come. Upcoming used to be
-    /// stone, which on the peach canvas read as a disabled row.
     var tint: Color { phase == .live ? Brand.accent : Brand.teal }
 
     var badgeSymbol: String { symbol ?? "airplane.departure" }
@@ -181,177 +270,12 @@ private extension EquitripSnapshot.TripSummary {
         URL(string: "equitrip://trip/\(id.uuidString)") ?? URL(string: "equitrip://trips")!
     }
 
-    /// The same swap `CurrentTripCard` makes: before anyone has paid for
-    /// anything, "Settled" is a claim the trip hasn't earned, so the figure
-    /// is what the trip will cost you instead.
-    var figure: (value: String, caption: String, tone: Color) {
+    /// Before anyone has paid for anything, "Settled" is a claim the trip
+    /// hasn't earned, so the figure is what the trip will cost you instead.
+    var figure: (value: String, caption: String) {
         showsBalance ?? true
-            ? (netLabel, netCaption, MoneyTone.of(net))
-            : (yourShareLabel ?? netLabel, "your share", Brand.ink)
-    }
-}
-
-/// "Live" as a small tinted pill beside a trip's name.
-private struct LiveChip: View {
-    var body: some View {
-        HStack(spacing: 3) {
-            Circle()
-                .frame(width: 4.5, height: 4.5)
-            Text("Live")
-                .font(.system(size: 9, weight: .bold))
-        }
-        .foregroundStyle(Brand.accent)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2.5)
-        .background(Brand.accent.opacity(0.13), in: .capsule)
-    }
-}
-
-// MARK: - Row
-
-/// One trip: its badge, name and stage, and where you stand on it.
-///
-/// Its own `Link`, so a tile with several trips opens the one that was
-/// tapped rather than always the first.
-private struct TripRow: View {
-    let trip: EquitripSnapshot.TripSummary
-
-    var body: some View {
-        Link(destination: trip.link) {
-            HStack(spacing: 11) {
-                WidgetSymbolBadge(symbol: trip.badgeSymbol, tint: trip.tint, size: 37)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(trip.title)
-                            .font(Brand.display(15))
-                            .foregroundStyle(Brand.ink)
-                            .lineLimit(1)
-
-                        if trip.phase == .live { LiveChip() }
-                    }
-
-                    // A live trip shows how far in, drawn; an upcoming one
-                    // has nothing to fill yet, so it gets its dates instead.
-                    if trip.phase == .live {
-                        HStack(spacing: 7) {
-                            Text(trip.progressLabel)
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(Brand.inkSecondary)
-                                .fixedSize()
-                            DayTrack(progress: trip.progress, days: trip.dayCount ?? 1, height: 4)
-                                .frame(maxWidth: 72)
-                        }
-                    } else {
-                        Text("\(trip.dateRange) · \(trip.progressLabel)")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(Brand.inkTertiary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 6)
-
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(trip.figure.value)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(trip.figure.tone)
-                    Text(trip.figure.caption)
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundStyle(Brand.inkTertiary)
-                }
-                .lineLimit(1)
-                .fixedSize()
-            }
-            .contentShape(.rect)
-        }
-    }
-}
-
-// MARK: - Featured card
-
-/// The lead trip at the size Home gives it: name in the display face, the
-/// day track across the full width, and the balance as the largest figure.
-private struct FeaturedTripCard: View {
-    let trip: EquitripSnapshot.TripSummary
-
-    var body: some View {
-        Link(destination: trip.link) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    WidgetSymbolBadge(symbol: trip.badgeSymbol, tint: trip.tint, size: 46)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(trip.title)
-                                .font(Brand.display(21))
-                                .foregroundStyle(Brand.ink)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                            if trip.phase == .live { LiveChip() }
-                        }
-                        Text("\(trip.destination) · \(trip.dateRange)")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(Brand.inkSecondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(trip.phase == .live ? trip.progressLabel : "Starts \(trip.progressLabel.lowercased())")
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(Brand.ink)
-                        Spacer(minLength: 6)
-                        if let travellers = trip.travellerCount {
-                            Label("\(travellers)", systemImage: "person.2.fill")
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .foregroundStyle(Brand.inkTertiary)
-                                .labelStyle(TightLabel())
-                        }
-                    }
-                    DayTrack(
-                        progress: trip.phase == .live ? trip.progress : 0,
-                        days: trip.dayCount ?? 1,
-                        tint: trip.tint,
-                        height: 6
-                    )
-                }
-
-                WidgetHairline()
-
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(trip.figure.value)
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundStyle(trip.figure.tone)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    Text(trip.figure.caption)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Brand.inkSecondary)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Brand.inkTertiary)
-                }
-            }
-            .padding(14)
-            .background(Brand.card.opacity(0.78), in: .rect(cornerRadius: 20, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(Brand.cardStroke.opacity(0.06))
-            }
-        }
-    }
-}
-
-private struct TightLabel: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 3) {
-            configuration.icon
-            configuration.title
-        }
+            ? (netLabel, netCaption)
+            : (yourShareLabel ?? netLabel, "your share")
     }
 }
 

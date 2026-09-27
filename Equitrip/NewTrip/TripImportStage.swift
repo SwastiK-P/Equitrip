@@ -265,7 +265,8 @@ struct TripImportStage: View {
         switch phase {
         case .done:
             let count = extractor.progress.itemCount
-            let how = extractor.usedFallback ? "found by pattern" : "read by Apple Intelligence"
+            let how = extractor.usedFallback ? "found by pattern"
+                : extractor.progress.nugenModel.map { "read by \($0)" } ?? "read by Apple Intelligence"
             return "\(count.pluralised("booking")) \(how)"
         default:
             let found = extractor.progress.itemCount

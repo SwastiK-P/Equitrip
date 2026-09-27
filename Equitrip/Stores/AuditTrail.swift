@@ -78,7 +78,11 @@ final class AuditTrail {
         events[event.tripID, default: []].insert(event, at: 0)
         events[event.tripID]?.sort { $0.at > $1.at }
 
-        Task { await SupabaseRepository.shared.recordAuditEvent(event) }
+        // Queued behind the change it records, so an entry about an expense
+        // logged offline goes up with that expense rather than being lost.
+        let outbox = OfflineOutbox.shared
+        outbox.enqueue(.audit(AuditEventRow(event: event, actorProfileID: Traveller.you.id)))
+        Task { await outbox.flush() }
     }
 
     /// Several entries from one action, in the order they happened.

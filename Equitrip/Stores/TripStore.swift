@@ -45,6 +45,8 @@ final class TripStore {
             // The semantic index Siri, Spotlight and Equi search. Same
             // reasoning as the widgets: on the property, so no change escapes.
             SpotlightIndex.publish(trips)
+            // And the phone's own copy, for opening without a connection.
+            scheduleCacheWrite()
         }
     }
 
@@ -56,11 +58,9 @@ final class TripStore {
     /// screen at a time.
     private(set) var writeFailure: String?
 
-    /// Trips created on this device whose upsert hasn't come back yet. `sync`
-    /// preserves these: replacing the list wholesale while a create was still
-    /// in flight is what made a brand-new trip vanish a second after it was
-    /// made.
-    private var unsynced: Set<UUID> = []
+    /// The trips on screen came from `OfflineCache`, not from this session's
+    /// sync, and no sync has replaced them yet.
+    private(set) var isShowingSavedCopy = false
 
     /// The trip the Expenses and Settle tabs are scoped to.
     var selectedTripID: UUID?
@@ -120,19 +120,32 @@ final class TripStore {
     ///
     /// Siri passes `includeInvitations: false`: nothing it answers reads them,
     /// and a cold launch behind a spoken question has no round trip to spare.
+    ///
+    /// Offline, the phone's saved copy is the answer. It goes on screen
+    /// before the server is asked, so a launch never waits on a network that
+    /// isn't there, and it stays when the server can't be reached. The
+    /// offline banner explains that the app is showing the saved copy.
+    /// Changes still in `OfflineOutbox` are sent before the read and laid
+    /// over what comes back, so an expense logged on the plane is never
+    /// replaced by a server copy that doesn't have it yet.
     func sync(includeInvitations: Bool = true) async {
-        if trips.isEmpty { state = .loading }
+        let outbox = OfflineOutbox.shared
+        outbox.onRejected = { [weak self] message in self?.writeFailure = message }
+
+        if trips.isEmpty, let saved = savedCopy() {
+            trips = outbox.applied(to: saved).sorted { $0.startDate > $1.startDate }
+            isShowingSavedCopy = true
+            state = .ready
+            if selectedTripID == nil { selectedTripID = currentTrip?.id ?? trips.first?.id }
+        }
+        if trips.isEmpty, !isShowingSavedCopy { state = .loading }
+
+        await outbox.flush()
 
         do {
             let remote = try await SupabaseRepository.shared.loadTrips()
-            let arrived = Set(remote.map(\.id))
-
-            // Anything still on its way to the server stays put, and stops
-            // being "unsynced" the moment the server confirms it.
-            let pending = trips.filter { unsynced.contains($0.id) && !arrived.contains($0.id) }
-            unsynced.subtract(arrived)
-
-            trips = (remote + pending).sorted { $0.startDate > $1.startDate }
+            trips = outbox.applied(to: remote).sorted { $0.startDate > $1.startDate }
+            isShowingSavedCopy = false
             state = .ready
 
             // After the trips, and never allowed to fail the sync: an
@@ -145,8 +158,68 @@ final class TripStore {
                 selectedTripID = currentTrip?.id ?? trips.first?.id
             }
         } catch {
-            state = .failed(AuthService.message(for: error))
+            // No connection and a saved copy on screen: that copy is the
+            // answer until the network comes back, and the banner already
+            // says so. Anything else is a real failure.
+            if NetworkMonitor.isConnectivity(error), isShowingSavedCopy || !NetworkMonitor.shared.isOnline {
+                state = .ready
+            } else {
+                state = .failed(AuthService.message(for: error))
+            }
         }
+    }
+
+    // MARK: - Saved copy
+
+    @ObservationIgnored private var pendingCacheWrite: Task<Void, Never>?
+
+    /// The trips this account last saw, or nil if there's no readable copy.
+    private func savedCopy() -> [Trip]? {
+        guard let account = AuthService.shared.accountID else { return nil }
+        return OfflineCache.load([Trip].self, .trips, account: account)
+    }
+
+    /// Writes the list shortly after it stops changing. A sync assigns it
+    /// once, but a quick add assigns it twice in a second (see `addItem`),
+    /// and the file only needs the second.
+    private func scheduleCacheWrite() {
+        guard let account = AuthService.shared.accountID else { return }
+        pendingCacheWrite?.cancel()
+        pendingCacheWrite = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            // Still the same login. A write left over from before a sign-out
+            // must not put the last account's trips back on the phone.
+            guard !Task.isCancelled, let self,
+                  AuthService.shared.accountID == account else { return }
+            OfflineCache.save(self.trips, .trips, account: account)
+        }
+    }
+
+    // MARK: - Queued writes
+
+    @ObservationIgnored private var lastOfflineToast = Date.distantPast
+
+    /// Hands a change to `OfflineOutbox` and starts it on its way.
+    ///
+    /// The change is already on screen. The outbox saves it to disk before
+    /// sending, so it survives no signal, a force quit, or both. Offline, a
+    /// toast confirms it was kept, once per burst of saves rather than twice
+    /// for every booking the classifier saves again.
+    private func queue(_ operation: OfflineOutbox.Operation) {
+        let outbox = OfflineOutbox.shared
+        outbox.enqueue(operation)
+
+        if !NetworkMonitor.shared.isOnline, Date().timeIntervalSince(lastOfflineToast) > 4 {
+            lastOfflineToast = Date()
+            GlassToastCenter.shared.show(.init(
+                symbol: "icloud.and.arrow.up",
+                tint: Palette.amber,
+                title: "Saved on this phone",
+                subtitle: "It'll reach everyone on the trip when you're back online."
+            ))
+        }
+
+        track { await outbox.flush() }
     }
 
     /// Pull-to-refresh and "try again" both land here.
@@ -179,27 +252,14 @@ final class TripStore {
 
     // MARK: - Mutation
 
+    /// Through the outbox, so a trip planned offline is kept and created
+    /// when the connection is back. It's queued before its audit entry,
+    /// which can't be filed against a trip the server hasn't seen yet.
     func add(_ trip: Trip) {
         trips.insert(trip, at: 0)
-        auditor?.tripCreated(trip)
         selectedTripID = trip.id
-        unsynced.insert(trip.id)
-
-        Task {
-            do {
-                try await SupabaseRepository.shared.createTrip(trip)
-                try await SupabaseRepository.shared.upsertItems(trip.items, tripID: trip.id)
-                unsynced.remove(trip.id)
-                writeFailure = nil
-
-                // Only once it's actually saved. Telling four people they're on
-                // a trip that then failed to write is worse than telling them
-                // nothing.
-                await SupabaseRepository.shared.announce(trip)
-            } catch {
-                writeFailure = "\(trip.title) didn't save. \(AuthService.message(for: error))"
-            }
-        }
+        queue(.createTrip(trip))
+        auditor?.tripCreated(trip)
     }
 
     /// Opens a trip's itinerary, replacing whatever was on the stack.
@@ -227,6 +287,10 @@ final class TripStore {
         trips.remove(at: index)
         itineraryPath.removeAll { $0 == .trip(tripID) }
         if selectedTripID == tripID { selectedTripID = currentTrip?.id ?? trips.first?.id }
+
+        // Made offline and never sent: there's nothing on the server to
+        // delete, and nobody else ever heard of it.
+        if OfflineOutbox.shared.discardUnsentTrip(tripID) { return }
 
         notifier?.announceTripDeleted(removed)
         auditor?.tripDeleted(removed)
@@ -269,6 +333,9 @@ final class TripStore {
 
         trips[index] = updated
         auditor?.tripUpdated(from: before, to: updated)
+        // Still waiting to be created: the edit goes into the queued trip
+        // instead of writing a row the server doesn't have yet.
+        if OfflineOutbox.shared.reviseUnsentTrip(updated) { return }
         write { try await SupabaseRepository.shared.updateTrip(updated, from: before) }
     }
 
@@ -282,6 +349,9 @@ final class TripStore {
 
         let before = trips[tripIndex].items[itemIndex]
         trips[tripIndex].items[itemIndex] = item
+        // Queued ahead of the notification and audit entry about it, so they
+        // never reach the server before the change they describe.
+        queue(.upsertItem(item, tripID: tripID))
 
         // Announced from the *updated* trip: a payment notification quotes
         // each person's share, and the share is computed from the booking as
@@ -292,8 +362,6 @@ final class TripStore {
             notifier?.announceBookingChanged(from: before, to: item, in: trips[tripIndex])
         }
         auditor?.expenseChanged(from: before, to: item, in: trips[tripIndex])
-
-        write { try await SupabaseRepository.shared.upsertItem(item, tripID: tripID) }
     }
 
     /// Reports a payment as wrong — the only way a payment's status changes
@@ -356,14 +424,13 @@ final class TripStore {
 
         let before = trips[tripIndex]
         trips[tripIndex].items.removeAll { $0.id == itemID }
+        queue(.deleteItem(itemID, title: removed.title, tripID: tripID))
         if let notice {
             notifier?.announce(notice, about: nil, in: trips[tripIndex], removed: true)
         } else {
             notifier?.announceBookingRemoved(removed, from: trips[tripIndex])
         }
         auditor?.expenseRemoved(removed, from: before)
-
-        write { try await SupabaseRepository.shared.deleteItem(itemID) }
     }
 
     /// Adds a booking, or replaces it if it's already here.
@@ -378,6 +445,7 @@ final class TripStore {
         if let existing = trips[tripIndex].items.firstIndex(where: { $0.id == item.id }) {
             let before = trips[tripIndex].items[existing]
             trips[tripIndex].items[existing] = item
+            queue(.upsertItem(item, tripID: tripID))
 
             // The second of those two saves is the classifier's, not a
             // person's — it moves the category and the glyph and nothing else.
@@ -387,8 +455,6 @@ final class TripStore {
             if Self.isMaterialEdit(from: before, to: item) {
                 auditor?.expenseChanged(from: before, to: item, in: trips[tripIndex])
             }
-
-            write { try await SupabaseRepository.shared.upsertItem(item, tripID: tripID) }
             return
         }
 
@@ -398,10 +464,9 @@ final class TripStore {
         if item.day < trips[tripIndex].startDate { trips[tripIndex].startDate = item.day }
         if item.day > trips[tripIndex].endDate { trips[tripIndex].endDate = item.day }
 
+        queue(.upsertItem(item, tripID: tripID))
         notifier?.announceBookingAdded(item, to: trips[tripIndex])
         auditor?.expenseAdded(item, to: trips[tripIndex])
-
-        write { try await SupabaseRepository.shared.upsertItem(item, tripID: tripID) }
     }
 
     /// Whether a re-save of the same booking moved anything a person would

@@ -56,6 +56,21 @@ enum AppSettings {
         set { UserDefaults.standard.set(newValue, forKey: upiIDKey) }
     }
 
+    // MARK: - Booking reader
+
+    private static let bookingReaderKey = "settings.bookingReader"
+
+    /// Which model reads an imported booking PDF. The Nugen aligned model
+    /// until the user picks another — it was trained on these documents and
+    /// works on phones without Apple Intelligence.
+    static var bookingReader: BookingReader {
+        get {
+            UserDefaults.standard.data(forKey: bookingReaderKey)
+                .flatMap { try? JSONDecoder().decode(BookingReader.self, from: $0) } ?? .nugenDefault
+        }
+        set { UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: bookingReaderKey) }
+    }
+
     // MARK: - Shake to add
 
     private static let shakeToAddExpenseKey = "settings.shakeToAddExpense"

@@ -332,7 +332,11 @@ struct EquiBubbleRow: View {
 
     let message: EquiMessage
     let isLastInGroup: Bool
+    /// Only the newest reply offers follow-ups, and not while the next one
+    /// is on its way.
+    var showsSuggestions = false
     var onOpenTrip: (Trip) -> Void = { _ in }
+    var onAsk: (String) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: message.isUser ? .trailing : .leading, spacing: 8) {
@@ -379,23 +383,42 @@ struct EquiBubbleRow: View {
             // Inset to the bubble's own column, so a card lines up under the
             // text rather than under the avatar beside it.
             if let card = message.card {
-                Button {
-                    guard let trip = tripStore.trip(card.tripID) else { return }
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    onOpenTrip(trip)
-                } label: {
-                    EquiCardView(card: card)
-                }
-                .buttonStyle(PressableButtonStyle())
-                // Held to the same width as the bubble above it on iPad; a
-                // card's figures are laid out for a phone's width and spread
-                // apart past it.
-                .frame(maxWidth: pane.isRegular ? 460 : .infinity, alignment: .leading)
-                .padding(.leading, message.isUser ? 0 : 31)
-                .transition(.scale(scale: 0.94, anchor: .top).combined(with: .opacity))
+                cardView(card)
+                    // Held to the same width as the bubble above it on iPad; a
+                    // card's figures are laid out for a phone's width and spread
+                    // apart past it.
+                    .frame(maxWidth: pane.isRegular ? 460 : .infinity, alignment: .leading)
+                    .padding(.leading, message.isUser ? 0 : 31)
+                    .transition(.scale(scale: 0.94, anchor: .top).combined(with: .opacity))
+            }
+
+            if showsSuggestions, !message.isUser, !message.suggestions.isEmpty {
+                EquiFollowUps(suggestions: message.suggestions, onAsk: onAsk)
+                    .padding(.leading, 31)
+                    .padding(.top, 2)
+                    .transition(.opacity.combined(with: .offset(y: 6)))
             }
         }
         .animation(.spring(response: 0.42, dampingFraction: 0.82), value: message.card)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: showsSuggestions && !message.suggestions.isEmpty)
+    }
+
+    /// A card about one trip opens it. A card about several has a row per
+    /// trip that opens its own, so it isn't wrapped in a button of its own.
+    @ViewBuilder
+    private func cardView(_ card: EquiCard) -> some View {
+        if card.tripID == nil {
+            EquiCardView(card: card, onOpenTrip: onOpenTrip)
+        } else {
+            Button {
+                guard let trip = tripStore.trip(card.tripID) else { return }
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onOpenTrip(trip)
+            } label: {
+                EquiCardView(card: card)
+            }
+            .buttonStyle(PressableButtonStyle())
+        }
     }
 
     /// iMessage-style grouping: bubbles stay fully rounded while more from the
@@ -538,5 +561,40 @@ extension View {
                     .delay(0.12 + Double(index) * 0.06),
                 value: appeared
             )
+    }
+}
+
+/// What to ask next, under Equi's latest reply.
+///
+/// Worked out from the answer rather than generated (`EquiFacts`), so each
+/// one is a question Equi has the figures for — a chip that led to "I can't
+/// tell" would teach people to stop tapping them.
+struct EquiFollowUps: View {
+    let suggestions: [String]
+    var onAsk: (String) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 7) {
+                ForEach(suggestions, id: \.self) { suggestion in
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        onAsk(suggestion)
+                    } label: {
+                        Text(suggestion)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(AppTheme.accentDeep)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(AppTheme.accent.opacity(0.1), in: .capsule)
+                            .overlay { Capsule().strokeBorder(AppTheme.accent.opacity(0.22), lineWidth: 0.75) }
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .scrollIndicators(.hidden)
+        .scrollClipDisabled()
     }
 }

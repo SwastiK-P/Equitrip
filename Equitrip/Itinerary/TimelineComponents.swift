@@ -11,6 +11,8 @@ import SwiftUI
 /// you're looking at. Glass, because it's chrome floating over content.
 struct DayHeader: View {
     let day: TripDay
+    /// Whose weather to show beside the date. Nil shows none.
+    var tripID: UUID?
     /// Nil leaves the header static — used wherever a day is shown without a
     /// list under it to fold, so there's nothing to open or close.
     var isCollapsed: Bool = false
@@ -42,6 +44,10 @@ struct DayHeader: View {
                 }
 
                 Spacer(minLength: 0)
+
+                if let tripID {
+                    DayWeatherBadge(date: day.date, tripID: tripID)
+                }
 
                 // Points down while the day is open, right once it's closed —
                 // the same disclosure convention as a folder, so it reads
@@ -259,6 +265,12 @@ struct TimelineRow: View {
                 footer
             }
             .padding(.bottom, 14)
+        } else if let train = item.train, train.isResolved {
+            VStack(alignment: .leading, spacing: 10) {
+                TrainTicketCard(train: train, fallbackDeparture: item.time, compact: true)
+                footer
+            }
+            .padding(.bottom, 14)
         } else {
             plainCard
         }
@@ -295,6 +307,8 @@ struct TimelineRow: View {
                 if let flight = item.flight, !flight.isResolved {
                     flightLine(flight)
                 }
+
+                TimelineWeatherChip(item: item, tripID: trip.id)
             }
 
             Spacer(minLength: 6)
@@ -365,10 +379,12 @@ struct TimelineRow: View {
     private var splitLabel: String {
         guard item.cost > 0 else { return item.split.label }
 
-        // One booking is charged to one person under both of these, so "each"
-        // would be a division by one dressed up as a split.
+        // One booking charged to one person — "each" would be a division by
+        // one dressed up as a split. Several organisers do split it, though.
         switch item.split {
-        case .organiser, .individual:
+        case .individual:
+            return item.split.label
+        case .organiser where trip.shares(of: item).count <= 1:
             return item.split.label
         default:
             let heads = trip.shares(of: item).count

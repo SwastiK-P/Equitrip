@@ -6,15 +6,31 @@
 import Foundation
 import FoundationModels
 
-/// The on-device Apple Intelligence model behind Equi's chat tab.
+/// The on-device Apple Intelligence model behind Equi's chat tab, and the
+/// order it's asked things in.
 ///
-/// A fresh `LanguageModelSession` is created for every question rather than
-/// reused turn over turn. That trades away the *model's own* memory of the
-/// exchange — recent turns are folded back in as plain text instead, see
-/// `Turn` — for the thing that matters more here: every answer is generated
-/// from the trip data as it stands right now, never from a briefing that was
-/// accurate when the conversation started but has since drifted, because an
-/// expense got logged or a settlement got confirmed mid-chat.
+/// Three steps a question, where there used to be one:
+///
+/// 1. **Read** the question into an `EquiQuery` — which trips, what about
+///    (`EquiQueryReader`: word rules plus a small classification pass).
+/// 2. **Answer** it in Swift (`EquiFacts`): the figures, a card narrowed to
+///    the question, a sentence that says it, and follow-ups to offer.
+/// 3. **Say** it. For anything about the trips' own plan, people and money,
+///    Swift's sentence *is* the reply. The model was tried as the writer:
+///    given only the right figures, it still ranked ₹63,900 above ₹95,600
+///    and said Kim paid the most while quoting what Kim owed — every number
+///    real, the relationship between them invented, which no check on the
+///    numbers can catch. The model writes only advice and small talk, from
+///    general knowledge plus the trip's facts, and a reply naming a figure
+///    the facts don't contain is replaced (`isGrounded`).
+///
+/// Without Apple Intelligence the rules read the question alone and every
+/// answer about the trips still works.
+///
+/// A fresh `LanguageModelSession` is created for every question: every
+/// answer comes from the trips as they are now, and earlier turns are folded
+/// back in as plain text (`Turn`), carrying the trip each was about so a
+/// follow-up that names none stays on it.
 enum EquiIntelligence {
 
     enum Availability: Equatable {
@@ -44,24 +60,30 @@ enum EquiIntelligence {
 
     /// One prior turn, folded back into the next prompt so the model can
     /// resolve "that one" or "the other trip" without the session itself
-    /// carrying the much larger trip briefing forward turn after turn.
+    /// carrying anything forward.
     struct Turn {
         let isUser: Bool
         let text: String
-    }
-
-    /// A snapshot of the answer as it's being generated: what to say so far,
-    /// and the card to draw under it once the model has committed to one.
-    struct Reply: Equatable {
-        var text: String
+        /// The trip that turn's answer was about.
+        var tripID: UUID?
         var card: EquiCard?
     }
 
-    /// Streams a reply to `question`. Each element is the *cumulative* text
-    /// generated so far — assign it straight to the bubble that's rendering
-    /// it, don't append. Never throws: a failure that survives the retry
-    /// below arrives as one last yielded chunk explaining what went wrong,
-    /// in plain words, so the view never has to know this can fail.
+    /// A snapshot of the answer as it's being generated.
+    struct Reply: Equatable {
+        var text: String
+        var card: EquiCard?
+        /// Offered as chips once the reply is complete.
+        var suggestions: [String] = []
+        /// The trip this answer was about, card or not.
+        var focusTripID: UUID?
+    }
+
+    /// Streams a reply to `question`. Each element is the *cumulative* reply
+    /// so far — assign it straight to the bubble that's rendering it, don't
+    /// append. The last element carries the suggestions. Never throws: a
+    /// failure arrives as Swift's own answer to the question, which is always
+    /// there to fall back on.
     @MainActor
     static func streamReply(
         to question: String,
@@ -70,89 +92,129 @@ enum EquiIntelligence {
     ) -> AsyncThrowingStream<Reply, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                do {
-                    try await run(question: question, turns: turns, store: store, compact: false, into: continuation)
-                } catch is CancellationError {
-                    // Nothing to say — the view already tore down for its
-                    // own reason (a new question, leaving the tab).
-                } catch {
-                    // The likeliest cause of a first-pass failure is the
-                    // on-device model's small context window — a trip with
-                    // enough bookings can still overflow it even after
-                    // `EquiContext`'s caps. One retry with the sharply
-                    // trimmed `compact` briefing and no chat history covers
-                    // that; anything else, this was going to fail either way.
+                let canThink = availability == .ready
+                let query = await EquiQueryReader.read(question, turns: turns, store: store, useModel: canThink)
+                guard !Task.isCancelled else { return continuation.finish() }
+
+                let facts = EquiFacts.answer(query, store: store)
+                let asked = EquiQueryReader.Cues.normalise(question)
+                var reply = Reply(
+                    text: "",
+                    card: facts.card,
+                    suggestions: [],
+                    focusTripID: facts.focusTripID
+                )
+                let suggestions = Array(facts.suggestions.filter { EquiQueryReader.Cues.normalise($0) != asked }.prefix(3))
+
+                if facts.allowsGeneralKnowledge, availability == .ready {
                     do {
-                        try await run(question: question, turns: [], store: store, compact: true, into: continuation)
+                        let written = try await write(question: question, turns: turns, facts: facts) { partial in
+                            reply.text = partial
+                            continuation.yield(reply)
+                        }
+                        let sources = facts.lines + [facts.headline, question] + turns.map(\.text)
+                        reply.text = written.isEmpty || !isGrounded(written, in: sources) ? facts.headline : written
                     } catch {
-                        continuation.yield(Reply(text: friendlyMessage(for: error), card: nil))
+                        guard !Task.isCancelled else { return continuation.finish() }
+                        // The model's own failures — a guardrail, a full
+                        // context — aren't the user's problem when Swift
+                        // already has something to say.
+                        reply.text = facts.headline
                     }
+                } else if case .unavailable(let reason) = availability, query.topic == .advice {
+                    reply.text = reason
+                } else {
+                    // Figures, and how they relate, are Swift's to say.
+                    await reveal(facts.headline, into: &reply, continuation: continuation)
+                    guard !Task.isCancelled else { return continuation.finish() }
+                    reply.text = facts.headline
                 }
+
+                reply.suggestions = suggestions
+                continuation.yield(reply)
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
     }
 
+    /// Lays a finished answer down a few words at a time, so a reply Swift
+    /// wrote arrives the way a written one does rather than in one jump.
     @MainActor
-    private static func run(
-        question: String,
-        turns: [Turn],
-        store: TripStore,
-        compact: Bool,
-        into continuation: AsyncThrowingStream<Reply, Error>.Continuation
-    ) async throws {
-        let instructions = EquiContext.build(store: store, compact: compact)
-        let session = LanguageModelSession(instructions: instructions)
-
-        var prompt = ""
-        if !turns.isEmpty {
-            prompt += "Recent conversation, for context only — answer the question below, don't re-answer these:\n"
-            for turn in turns.suffix(6) {
-                prompt += "\(turn.isUser ? "User" : "Equi"): \(turn.text)\n"
-            }
-            prompt += "\n"
-        }
-        prompt += "User: \(question)"
-
-        // Structured rather than free text: the model fills in a reply *and*
-        // picks a card, and constrained decoding means the card is always one
-        // this app knows how to draw. See `EquiAnswer`.
-        let stream = session.streamResponse(to: prompt, generating: EquiAnswer.self)
-        for try await snapshot in stream {
-            try Task.checkCancellation()
-
-            let partial = snapshot.content
-            var card: EquiCard?
-            if let kind = partial.card, kind != .text, let trip = resolveTrip(partial.tripTitle, store: store) {
-                card = EquiCard(kind: kind, tripID: trip.id)
-            }
-
-            continuation.yield(Reply(text: partial.reply ?? "", card: card))
+    private static func reveal(
+        _ text: String,
+        into reply: inout Reply,
+        continuation: AsyncThrowingStream<Reply, Error>.Continuation
+    ) async {
+        let words = text.split(separator: " ", omittingEmptySubsequences: false)
+        var shown = ""
+        for (index, word) in words.enumerated() {
+            shown += (index == 0 ? "" : " ") + word
+            guard index % 2 == 1 || index == words.count - 1 else { continue }
+            reply.text = shown
+            continuation.yield(reply)
+            try? await Task.sleep(for: .milliseconds(28))
+            if Task.isCancelled { return }
         }
     }
 
-    /// Matches the trip the model named against the real ones.
-    ///
-    /// It's given exact titles in the briefing and usually copies one back,
-    /// but "the Goa one" and a half-remembered title both need to land
-    /// somewhere sensible — hence the widening passes, and the fall back to
-    /// whichever trip the rest of the app currently considers current. A card
-    /// about the wrong trip is a bug; a card about no trip at all is a blank
-    /// space where an answer should be.
+    /// Streams the model's reply through `onPartial`, and returns where it
+    /// ended up.
     @MainActor
-    private static func resolveTrip(_ title: String?, store: TripStore) -> Trip? {
-        let query = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    private static func write(
+        question: String,
+        turns: [Turn],
+        facts: EquiFacts,
+        onPartial: (String) -> Void
+    ) async throws -> String {
+        let session = LanguageModelSession(instructions: EquiContext.instructions(for: facts))
 
-        if !query.isEmpty {
-            if let exact = store.trips.first(where: { $0.title.lowercased() == query }) { return exact }
-            if let partial = store.trips.first(where: {
-                let title = $0.title.lowercased()
-                return title.contains(query) || query.contains(title) || $0.destination.lowercased().contains(query)
-            }) { return partial }
+        var prompt = ""
+        if !turns.isEmpty {
+            prompt += "Earlier in this conversation, for context only — answer the latest question, don't re-answer these:\n"
+            for turn in turns.suffix(4) {
+                prompt += "\(turn.isUser ? "User" : "Equi"): \(turn.text.prefix(240))\n"
+            }
+            prompt += "\n"
         }
+        prompt += "Latest question: \(question)"
 
-        return store.selectedTrip ?? store.currentTrip ?? store.trips.first
+        var text = ""
+        let stream = session.streamResponse(to: prompt, options: GenerationOptions(temperature: 0.5))
+        for try await snapshot in stream {
+            try Task.checkCancellation()
+            text = snapshot.content
+            onPartial(text)
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Grounding
+
+    /// Whether every figure in a reply appears in what it was written from.
+    ///
+    /// The model is told to copy amounts and dates, and mostly does; this is
+    /// for the time it doesn't. Money is always checked, and so is any number
+    /// of 100 or more — days, counts and percentages below that pass, since
+    /// "3 nights" is a fair reading of two dates and a wrong one is harmless.
+    static func isGrounded(_ reply: String, in sources: [String]) -> Bool {
+        let allowed = Set(sources.flatMap { figures(in: $0).map(\.value) })
+        return figures(in: reply).allSatisfy { figure in
+            allowed.contains(figure.value) || (!figure.isMoney && (Double(figure.value) ?? 0) < 100)
+        }
+    }
+
+    private static let figurePattern = #/([₹$€£¥]\s?)?(\d[\d,]*(?:\.\d+)?)/#
+
+    private static func figures(in text: String) -> [(value: String, isMoney: Bool)] {
+        text.matches(of: figurePattern).map { match in
+            var value = String(match.output.2).replacingOccurrences(of: ",", with: "")
+            if value.contains(".") {
+                while value.hasSuffix("0") { value.removeLast() }
+                if value.hasSuffix(".") { value.removeLast() }
+            }
+            return (value, match.output.1 != nil)
+        }
     }
 
     /// Plain-language stand-ins for the model's own error cases — most of

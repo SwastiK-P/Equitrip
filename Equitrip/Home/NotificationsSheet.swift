@@ -168,11 +168,18 @@ struct NotificationsSheet: View {
 
             VStack(spacing: 10) {
                 ForEach(items) { item in
-                    NotificationCard(item: item) {
+                    SwipeToDelete(corner: 20, onDelete: {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                            store.markRead(item.id)
+                            store.delete(item.id)
+                        }
+                    }) {
+                        NotificationCard(item: item) {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                store.markRead(item.id)
+                            }
                         }
                     }
+                    .transition(.asymmetric(insertion: .identity, removal: .move(edge: .leading).combined(with: .opacity)))
                 }
             }
         }

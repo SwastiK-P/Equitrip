@@ -27,6 +27,7 @@ enum WidgetPublisher {
         SharedStore.save(snapshot)
         WidgetCenter.shared.reloadAllTimelines()
         WatchBridge.shared.publish(snapshot)
+        WidgetImageWriter.update(for: trips)
     }
 
     /// Clears everything on sign-out. A widget still showing the last
@@ -35,6 +36,7 @@ enum WidgetPublisher {
     static func clear() {
         lastPublished = EquitripSnapshot.empty
         SharedStore.save(.empty)
+        WidgetImageWriter.clear()
         WidgetCenter.shared.reloadAllTimelines()
         WatchBridge.shared.publish(.empty)
     }
@@ -115,7 +117,8 @@ enum WidgetPublisher {
             bookingLabel: trip.bookingCount.pluralised("booking"),
             projectedLabel: trip.projectedLabel,
             coverURL: trip.cover.map { $0.thumbURL ?? $0.url },
-            symbol: trip.symbol
+            symbol: trip.symbol,
+            travellerIDs: trip.travellers.prefix(3).map(\.id)
         )
     }
 
@@ -229,6 +232,7 @@ enum WidgetPublisher {
                         tripID: trip.id,
                         tripTitle: trip.title,
                         fromName: trip.traveller(settlement.fromID)?.name ?? "Someone",
+                        fromID: settlement.fromID,
                         // Exact, not `glance`: this is the figure somebody is
                         // checking against their bank app before confirming.
                         amountLabel: Money.format(settlement.amount, code: settlement.currencyCode),
